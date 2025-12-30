@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "data_files": {
+    "test_data.txt": "C:/Users/bench/OneDrive/Documents/\u00c9cole/Code/pyqt_plotter/test_data.txt"
+  },
+  "config": {
+    "xlabel": "X",
+    "ylabel": "Y",
+    "ratio": [
+      1,
+      1
+    ],
+    "xlimits": [
+      null,
+      null
+    ],
+    "ylimits": [
+      null,
+      null
+    ],
+    "grid": false,
+    "minor_ticks": false,
+    "minor_grid": false,
+    "legend": true,
+    "xticksN": 20,
+    "yticksN": 14,
+    "palette_name": "Plotly"
+  },
+  "curves": [
+    {
+      "name": "Curve 1",
+      "axis": "primary",
+      "x_file": "test_data.txt",
+      "x_col": "Column1",
+      "y_file": "test_data.txt",
+      "y_col": "Column4",
+      "color": "#6DCD59",
+      "palette_name": "Viridis",
+      "marker": "o",
+      "marker_size": 5,
+      "linestyle": "--",
+      "linewidth": 2.0
+    }
+  ]
+}
