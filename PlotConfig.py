@@ -14,3 +14,5 @@ class PlotConfig:
         self.ylimits = None  # (min, max) or None
         self.xticksN = None  # number of ticks or None
         self.yticksN = None  # number of ticks or None
+        self.subplots = False  # number of subplots
+        self.suplot_layout = (1, 1)  # (rows, cols) if subplots is True

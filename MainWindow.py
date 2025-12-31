@@ -111,7 +111,7 @@ class MainWindow(QMainWindow):
         self._build_line_section()
         self._build_axis_limits_section()
         self._build_ticks_section()
-        self._build_grid_section()
+        # self._build_grid_section()
         self._build_actions_section()
 
         self.control_layout.addStretch()
@@ -304,6 +304,7 @@ class MainWindow(QMainWindow):
 
         grid.addWidget(QLabel("Major Grid"), 0, 0)
         self.major_grid_checkbox = QCheckBox()
+        self.major_grid_checkbox.setChecked(True)
         grid.addWidget(self.major_grid_checkbox, 0, 1)
 
         # grid.addWidget(QLabel("Minor Grid"), 1, 0)
@@ -381,7 +382,7 @@ class MainWindow(QMainWindow):
         self.x_ticks_edit.valueChanged.connect(self.on_canvas_settings_changed)
         self.y_ticks_edit.valueChanged.connect(self.on_canvas_settings_changed)
         # self.minor_ticks_checkbox.stateChanged.connect(self.on_canvas_settings_changed)
-        self.major_grid_checkbox.stateChanged.connect(self.on_canvas_settings_changed)
+        # self.major_grid_checkbox.stateChanged.connect(self.on_canvas_settings_changed)
         # self.minor_grid_checkbox.stateChanged.connect(self.on_canvas_settings_changed)
 
         # --- Advanced dialog ---
@@ -700,7 +701,7 @@ class MainWindow(QMainWindow):
         self.controller.config.yticksN = self.y_ticks_edit.value()
         # self.controller.config.minor_ticks = self.minor_ticks_checkbox.isChecked()
         # self.controller.config.minor_grid = self.minor_ticks_checkbox.isChecked()
-        self.controller.config.grid = self.major_grid_checkbox.isChecked()
+        # self.controller.config.grid = self.major_grid_checkbox.isChecked()
         # self.controller.config.minor_grid = self.minor_grid_checkbox.isChecked()
 
         try:

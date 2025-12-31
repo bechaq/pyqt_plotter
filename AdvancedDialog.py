@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox,
-    QSpinBox, QCheckBox
+    QSpinBox, QCheckBox, QLabel, QLineEdit
 )
 
 class AdvancedDialog(QDialog):
@@ -24,7 +24,7 @@ class AdvancedDialog(QDialog):
         form.addRow(self.grid_check)
 
         self.minor_ticks_check = QCheckBox("Minor ticks")
-        self.minor_ticks_check.setChecked(getattr(config, "minor_ticks", False))
+        self.minor_ticks_check.setChecked(getattr(config, "minor_ticks", True))
         form.addRow(self.minor_ticks_check)
 
         self.minor_grid_check = QCheckBox("Minor grid")
@@ -34,6 +34,22 @@ class AdvancedDialog(QDialog):
         self.legend_check = QCheckBox("Legend")
         self.legend_check.setChecked(getattr(config, "legend", True))
         form.addRow(self.legend_check)
+
+        self.subplot_label = QLabel("Subplots layout (rows, cols):")
+        self.subplot_rows = QSpinBox()
+        self.subplot_rows.setMinimum(1)
+        self.subplot_rows.setValue(self.config.suplot_layout[0])
+        self.subplot_cols = QSpinBox()
+        self.subplot_cols.setMinimum(1)
+        self.subplot_cols.setValue(self.config.suplot_layout[1])
+        subplot_layout = QHBoxLayout()
+        subplot_layout.addWidget(self.subplot_label)
+        subplot_layout.addWidget(self.subplot_rows)
+        subplot_layout.addWidget(self.subplot_cols)
+        form.addRow(subplot_layout)
+        
+ 
+
 
         # Buttons (OK / Cancel)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -49,3 +65,9 @@ class AdvancedDialog(QDialog):
         self.config.minor_grid = bool(self.minor_grid_check.isChecked())
         self.config.legend = bool(self.legend_check.isChecked())
         self.config.dirty = True  # layout may need refresh
+        if self.subplot_cols.value() > 1 or self.subplot_rows.value() > 1:
+            self.config.subplots = True
+        else:
+            self.config.subplots = False
+
+        self.config.suplot_layout = (self.subplot_rows.value(), self.subplot_cols.value())
