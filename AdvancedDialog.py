@@ -38,10 +38,11 @@ class AdvancedDialog(QDialog):
         self.subplot_label = QLabel("Subplots layout (rows, cols):")
         self.subplot_rows = QSpinBox()
         self.subplot_rows.setMinimum(1)
-        self.subplot_rows.setValue(self.config.suplot_layout[0])
+        self.subplot_rows.setValue(self.config.subplot_layout[0])
         self.subplot_cols = QSpinBox()
         self.subplot_cols.setMinimum(1)
-        self.subplot_cols.setValue(self.config.suplot_layout[1])
+
+        self.subplot_cols.setValue(self.config.subplot_layout[1])
         subplot_layout = QHBoxLayout()
         subplot_layout.addWidget(self.subplot_label)
         subplot_layout.addWidget(self.subplot_rows)
@@ -49,14 +50,16 @@ class AdvancedDialog(QDialog):
         form.addRow(subplot_layout)
         
  
-
-
         # Buttons (OK / Cancel)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-
+    def get_max_subplot_index(self):
+        """Return the maximum subplot index based on current rows and columns."""
+        rows = self.subplot_rows.value()
+        cols = self.subplot_cols.value()
+        return rows * cols - 1
     def apply_to_config(self):
         """Write dialog values back into PlotConfig."""
         
@@ -65,9 +68,10 @@ class AdvancedDialog(QDialog):
         self.config.minor_grid = bool(self.minor_grid_check.isChecked())
         self.config.legend = bool(self.legend_check.isChecked())
         self.config.dirty = True  # layout may need refresh
+
         if self.subplot_cols.value() > 1 or self.subplot_rows.value() > 1:
             self.config.subplots = True
         else:
             self.config.subplots = False
 
-        self.config.suplot_layout = (self.subplot_rows.value(), self.subplot_cols.value())
+        self.config.subplot_layout = (self.subplot_rows.value(), self.subplot_cols.value())

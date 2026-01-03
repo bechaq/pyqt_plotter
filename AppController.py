@@ -31,7 +31,7 @@ class AppController:
     def add_curve(self, file_name, data_file, x_col, y_col, axis, color, palette_name="Plotly", marker=None, marker_size=None, linestyle="-", linewidth=1.0, x_data_file=None, y_data_file=None):
         name = f"Curve {self.curve_counter}"
         self.curve_counter += 1
-        curve = Curve(file_name, data_file, x_col, y_col, axis, name=name, color=color, palette_name=palette_name, marker=marker, marker_size=marker_size, linestyle=linestyle, linewidth=linewidth, x_data_file=x_data_file, y_data_file=y_data_file)
+        curve = Curve(file_name, data_file, x_col, y_col, axis, name=name, color=color, palette_name=palette_name, marker=marker, marker_size=marker_size, linestyle=linestyle, linewidth=linewidth, x_data_file=x_data_file, y_data_file=y_data_file, subplot_index=0)
         self.curves.append(curve)
         self.update_plot()
         return curve
@@ -42,7 +42,7 @@ class AppController:
             self.curve_counter -= 1
             self.update_plot()
 
-    def update_curve(self, idx, x_col, y_col, axis, color, palette_name="Plotly", Marker = None,marker_size=None, linestyle="-", linewidth=1.0):
+    def update_curve(self, idx, x_col, y_col, axis, color, palette_name="Plotly", Marker = None,marker_size=None, linestyle="-", linewidth=1.0, subplot_index=0):
         c = self.curves[idx]
         c.x_col = x_col
         c.y_col = y_col
@@ -53,6 +53,7 @@ class AppController:
         c.palette_name = palette_name
         c.linestyle = linestyle
         c.linewidth = linewidth
+        c.subplot_index = subplot_index
         # self.update_plot()
 
     def update_plot(self):

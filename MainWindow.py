@@ -190,6 +190,11 @@ class MainWindow(QMainWindow):
         self.axis_combo.addItems(["primary", "secondary"])
         self.control_layout.addWidget(self.axis_combo)
 
+        self.control_layout.addWidget(QLabel("Subplot index"))
+        self.subplot_index_combo = QComboBox()
+        self.subplot_index_combo.addItems(["0","1","2","3","4"])
+        self.control_layout.addWidget(self.subplot_index_combo)
+
     def _build_color_section(self):
         """Palette selection + swatch combo for curve color."""
         grid = QGridLayout()
@@ -357,6 +362,9 @@ class MainWindow(QMainWindow):
         # editingFinished emits no args; we read the QLineEdit text in handler
         self.xlabel_edit.editingFinished.connect(self.on_xlabel_changed)
         self.ylabel_edit.editingFinished.connect(self.on_ylabel_changed)
+
+        # --- Subplot index ---
+        self.subplot_index_combo.currentTextChanged.connect(self.on_curve_settings_changed)
 
         # --- Palette ---
         self.palette_combo.currentTextChanged.connect(self.on_palette_changed)
@@ -582,13 +590,14 @@ class MainWindow(QMainWindow):
         widgets_to_block = [
             self.x_combo, self.y_combo, self.axis_combo, self.curve_name_edit,
             self.palette_combo, self.color_combo, self.marker_combo,
-            self.marker_size_combo, self.linestyle_combo, self.linewidth_combo
+            self.marker_size_combo, self.linestyle_combo, self.linewidth_combo, self.subplot_index_combo
         ]
         for w in widgets_to_block:
             w.blockSignals(True)
 
         # Basic properties
         self.curve_name_edit.setText(c.name)
+        self.subplot_index_combo.setCurrentText(str(c.subplot_index))
 
         # Find file names matching x/y data files
         x_file_name = None
@@ -673,6 +682,7 @@ class MainWindow(QMainWindow):
             self.marker_size_combo.value(),
             self.linestyle_combo.currentText(),
             float(self.linewidth_combo.currentText()),
+            subplot_index=int(self.subplot_index_combo.currentText() or "0"),
         )
 
         # Keep curve list in sync and keep selection
@@ -728,7 +738,13 @@ class MainWindow(QMainWindow):
         if dlg.exec_() == QDialog.Accepted:
             dlg.apply_to_config()
             self.controller.update_plot()
+            max_index = dlg.get_max_subplot_index()
+            self.populate_subplot_indices(max_index)
 
+    def populate_subplot_indices(self,max_index):
+        self.subplot_index_combo.clear()
+        indices = [str(i) for i in range(max_index+1) or "0"]
+        self.subplot_index_combo.addItems(indices)
 
     def save_project(self):
         path, _ = QFileDialog.getSaveFileName(

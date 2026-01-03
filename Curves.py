@@ -1,6 +1,6 @@
 
 class Curve:
-    def __init__(self, file_name, data_file, x_col, y_col, axis="primary", name=None, color = None, palette_name="Plotly", marker=None, marker_size=None, linestyle="-", linewidth=1.0, x_data_file=None, y_data_file=None):
+    def __init__(self, file_name, data_file, x_col, y_col, axis="primary", name=None, color = None, palette_name="Plotly", marker=None, marker_size=None, linestyle="-", linewidth=1.0, x_data_file=None, y_data_file=None, subplot_index=0):
         
         self.file_name = file_name 
         self.data_file = data_file
@@ -12,6 +12,7 @@ class Curve:
         self.axis = axis
         self.name = name or "Curve"
         self.color = color
+        self.subplot_index = subplot_index
         self.palette_name = palette_name
         self.marker = marker
         self.linestyle = linestyle
