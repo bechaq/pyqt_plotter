@@ -31,6 +31,14 @@ class AdvancedDialog(QDialog):
         self.minor_grid_check.setChecked(getattr(config, "minor_grid", False))
         form.addRow(self.minor_grid_check)
 
+        self.shared_x_check = QCheckBox("Shared X axis")
+        self.shared_x_check.setChecked(getattr(config, "shared_x", False))
+        form.addRow(self.shared_x_check)
+
+        self.shared_y_check = QCheckBox("Shared Y axis")
+        self.shared_y_check.setChecked(getattr(config, "shared_y", False))
+        form.addRow(self.shared_y_check)
+
         self.legend_check = QCheckBox("Legend")
         self.legend_check.setChecked(getattr(config, "legend", True))
         form.addRow(self.legend_check)
@@ -67,6 +75,10 @@ class AdvancedDialog(QDialog):
         self.config.minor_ticks = bool(self.minor_ticks_check.isChecked())
         self.config.minor_grid = bool(self.minor_grid_check.isChecked())
         self.config.legend = bool(self.legend_check.isChecked())
+        self.config.shared_x = bool(self.shared_x_check.isChecked())
+        self.config.shared_y = bool(self.shared_y_check.isChecked())
+
+        # Possibly need to un comment
         self.config.dirty = True  # layout may need refresh
 
         if self.subplot_cols.value() > 1 or self.subplot_rows.value() > 1:

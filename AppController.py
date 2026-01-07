@@ -15,10 +15,10 @@ class AppController:
         self.config = PlotConfig()
         self.curve_counter = 1
 
-    def load_file(self, path):
-        self.data_files[path] = load_data_file(path)
-        # self.curves.clear()
-        # self.curve_counter = 1
+    # def load_file(self, path):
+    #     self.data_files[path] = load_data_file(path)
+    #     # self.curves.clear()
+    #     # self.curve_counter = 1
         
     def remove_file(self, file_name):
         if file_name in self.data_files:
@@ -39,7 +39,7 @@ class AppController:
     def remove_curve(self, idx):
         if 0 <= idx < len(self.curves):
             self.curves.pop(idx)
-            self.curve_counter -= 1
+            # self.curve_counter -= 1
             self.update_plot()
 
     def update_curve(self, idx, x_col, y_col, axis, color, palette_name="Plotly", Marker = None,marker_size=None, linestyle="-", linewidth=1.0, subplot_index=0):
@@ -78,6 +78,10 @@ class AppController:
             "xticksN": getattr(self.config, "xticksN", None),
             "yticksN": getattr(self.config, "yticksN", None),
             "palette_name": getattr(self.config, "palette_name", "Plotly"),
+            "subplot_layout":getattr(self.config, "subplot_layout", (1,1)),
+            "shared_x": getattr(self.config, "shared_x", False),
+            "shared_y": getattr(self.config, "shared_y", False),
+            "subplots_config": getattr(self.config, "subplots_config", {}),
         }
 
         curves = []
@@ -95,6 +99,8 @@ class AppController:
                 "marker_size": c.marker_size,
                 "linestyle": c.linestyle,
                 "linewidth": c.linewidth,
+                "subplot_index": c.subplot_index,
+
             })
 
         return {"version": 1, "data_files": data_files, "config": config, "curves": curves}
@@ -143,6 +149,11 @@ class AppController:
         self.config.yticksN = cfg.get("yticksN", None)
         self.config.palette_name = cfg.get("palette_name", "Plotly")
         self.config.dirty = True
+        self.config.subplot_layout = tuple(cfg.get("subplot_layout", (1, 1)))
+        self.config.shared_x = cfg.get("shared_x", False)
+        self.config.shared_y = cfg.get("shared_y", False)
+        self.config.subplots_config = cfg.get("subplots_config", {})
+
 
         # Restore curves (only if their referenced files exist)
         for c in obj.get("curves", []):
@@ -153,7 +164,7 @@ class AppController:
 
             curve = self._make_curve_from_dict(c)
             self.curves.append(curve)
-
+        print(self.config.subplot_layout)
         self.update_plot()
         return missing
 
@@ -183,5 +194,6 @@ class AppController:
             x_data_file=x_df,
             y_data_file=y_df,
             name=d.get("name", "Curve"),
+            subplot_index=d.get("subplot_index", 0),
         )
         return curve

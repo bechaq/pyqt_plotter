@@ -9,12 +9,23 @@ class PlotCanvas(FigureCanvas):
         self.axes = []
         self.ax2 = {}          # secondary axes per subplot
         self._last_layout = None
+        self._last_shared_x = None
+        self._last_shared_y = None
+
         super().__init__(self.fig)
         
-    def clear(self, layout):
-        if self._last_layout != layout:
-            self._create_subplots(layout)
+    def clear(self, layout, config):
+        need_rebuild = (
+        self._last_layout != layout
+        or self._last_shared_x != config.shared_x
+        or self._last_shared_y != config.shared_y
+    )
+
+        if need_rebuild:
+            self._create_subplots(layout, config.shared_x, config.shared_y, config)
             self._last_layout = layout
+            self._last_shared_x = config.shared_x
+            self._last_shared_y = config.shared_y
         else:
             for ax in self.axes:
                 ax.clear()
@@ -39,7 +50,7 @@ class PlotCanvas(FigureCanvas):
     def draw_curves(self, curves, config):
         
         # 1) Create/clear axes
-        self.clear(config.subplot_layout)   # your clear() handles fig.subplots + clearing
+        self.clear(config.subplot_layout, config)   # your clear() handles fig.subplots + clearing
 
 
         # 2) Plot curves in their subplot
@@ -65,33 +76,64 @@ class PlotCanvas(FigureCanvas):
 
         # 3) Apply config to *each* subplot (and its secondary axis if present)
         for i, ax in enumerate(self.axes):
-            ax2 = self.ax2.get(i)
-
-            # ---- Limits ----
-            if config.xlimits is not None:
-                ax.set_xlim(config.xlimits)
-            if config.ylimits is not None:
-                ax.set_ylim(config.ylimits)
-                if ax2 is not None:
-                    ax2.set_ylim(config.ylimits)   # optional: separate secondary y-limits later
-
-            # ---- Labels ----
-            # Typical subplot convention: only label outer axes
+            ov = config.subplots_config.get(i, {})
             rows, cols = config.subplot_layout
             r, c = divmod(i, cols)
 
-            if r == rows - 1:                 # bottom row
-                ax.set_xlabel(config.xlabel)
-            if c == 0:                        # left column
-                ax.set_ylabel(config.ylabel)
 
-            # ---- Major tick count (auto-spaced) ----
-            if config.xticksN is not None:
-                ax.xaxis.set_major_locator(MaxNLocator(nbins=config.xticksN))
-            if config.yticksN is not None:
-                ax.yaxis.set_major_locator(MaxNLocator(nbins=config.yticksN))
-                if ax2 is not None:
-                    ax2.yaxis.set_major_locator(MaxNLocator(nbins=config.yticksN))
+            # shared_x rule: xlabel/xlim/xticks must be global
+            if config.shared_x:
+                if r == rows-1:  # bottom row
+                    ax.set_xlabel(ov.get("xlabel", config.xlabel))
+                else:
+                    ax.set_xlabel("")
+                    ax.tick_params(labelbottom=False)
+
+                xlim = ov.get("xlim", config.xlimits)
+                xtN  = ov.get("xticksN", config.xticksN)
+            else:
+                ax.set_xlabel(ov.get("xlabel", config.xlabel))
+
+                xlim = ov.get("xlim", config.xlimits)
+                xtN  = ov.get("xticksN", config.xticksN)
+
+            # y is per subplot (unless you later decide shared_y similar)
+            ax.set_ylabel(ov.get("ylabel", config.ylabel))
+            ylim = ov.get("ylim", config.ylimits)
+            ytN  = ov.get("yticksN", config.yticksN)
+
+            if xlim is not None: ax.set_xlim(xlim)
+            if ylim is not None: ax.set_ylim(ylim)
+
+            if xtN is not None: ax.xaxis.set_major_locator(MaxNLocator(xtN))
+            if ytN is not None: ax.yaxis.set_major_locator(MaxNLocator(ytN))
+
+            # remove last tick label for subplots with shared x to avoid overlap
+            if rows > 1 and config.shared_x and r > 0:
+                yticks = ax.get_yticklabels()
+
+                if yticks:
+                    yticks[-1].set_visible(False)
+
+        # for i, ax in enumerate(self.axes):
+            ax2 = self.ax2.get(i)
+
+            # # ---- Limits ----
+            # if config.xlimits is not None:
+            #     ax.set_xlim(config.xlimits)
+            # if config.ylimits is not None:
+            #     ax.set_ylim(config.ylimits)
+            #     if ax2 is not None:
+            #         ax2.set_ylim(config.ylimits)   # optional: separate secondary y-limits later
+
+
+            # # ---- Major tick count (auto-spaced) ----
+            # if config.xticksN is not None:
+            #     ax.xaxis.set_major_locator(MaxNLocator(nbins=config.xticksN))
+            # if config.yticksN is not None:
+            #     ax.yaxis.set_major_locator(MaxNLocator(nbins=config.yticksN))
+            #     if ax2 is not None:
+            #         ax2.yaxis.set_major_locator(MaxNLocator(nbins=config.yticksN))
 
             # ---- Minor ticks ----
             if config.minor_ticks:
@@ -134,30 +176,60 @@ class PlotCanvas(FigureCanvas):
         w, h = self.ratio_to_inches(config.ratio)
 
         self.fig.set_size_inches(w,h)
+
         if config.dirty:
-            self.fig.tight_layout()
+            # tighter layout, but don't re-add vertical gaps when sharex
+            if config.shared_x and rows> 1:
+                # self.fig.tight_layout(h_pad=0.0)
+                self.fig.subplots_adjust(hspace=0)
+            else:
+                self.fig.tight_layout()
             config.dirty = False
+
         self.draw_idle()
 
 
-    def _get_axis(self, axis):
+    # def _get_axis(self, axis):
 
-        if axis == "primary":
-            return self.ax
-        elif axis == "secondary":
-            if self.ax2 is None:
-                self.ax2 = self.ax.twinx()
-            return self.ax2
-        else:
-            raise ValueError("Unknown axis")
+    #     if axis == "primary":
+    #         return self.ax
+    #     elif axis == "secondary":
+    #         if self.ax2 is None:
+    #             self.ax2 = self.ax.twinx()
+    #         return self.ax2
+    #     else:
+    #         raise ValueError("Unknown axis")
     
-    def _create_subplots(self, layout):
+    def _create_subplots(self, layout, shared_x=False, shared_y=False, config=None):
         rows, cols = layout
 
         self.fig.clear()
-        axs = self.fig.subplots(rows, cols)
+        sharex = "col" if shared_x else False
+        sharey = "row" if shared_y else False
+        axs = self.fig.subplots(rows, cols, sharex=sharex, sharey=sharey)
 
+        if shared_x:
+            self.fig.subplots_adjust(hspace=0)
+        # 
         # flatten → axs[0], axs[1], ...
         self.axes = list(axs.flat) if hasattr(axs, "flat") else [axs]
         self.ax2.clear()
+
+        # Create a default config dict for each subplot (if missing)
+        if config is not None:
+            for i in range(len(self.axes)):
+                ov = config.subplots_config.get(i)
+                if ov is None:
+                    config.subplots_config[i] = {
+                        "xlabel": config.xlabel,
+                        "ylabel": config.ylabel,
+                        "xlim": config.xlimits,
+                        "ylim": config.ylimits,
+                        "xticksN": config.xticksN,
+                        "yticksN": config.yticksN,
+                    }
+                else:
+                    # ensure it is not a shared reference (defensive)
+                    config.subplots_config[i] = dict(ov)
+
 

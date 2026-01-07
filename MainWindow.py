@@ -33,7 +33,7 @@ from Color_modules import (
 from DataFile import load_data_file
 from AdvancedDialog import *
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow): 
     def __init__(self):
         super().__init__()
 
@@ -52,6 +52,11 @@ class MainWindow(QMainWindow):
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self.controller.update_plot)
+
+
+        # Deactivate subplot list initially
+        self._active_subplot = None  # None = global, sinon int subplot index
+
 
         # Build UI + connect signals
         self._build_ui()
@@ -105,6 +110,7 @@ class MainWindow(QMainWindow):
         self._build_files_section()
         self._build_axis_labels_section()
         self._build_dimension_section()
+        self._build_subplots_section()
         self._build_curves_section()
         self._build_color_section()
         self._build_marker_section()
@@ -254,6 +260,14 @@ class MainWindow(QMainWindow):
 
         self.control_layout.addLayout(grid)
 
+    def _build_subplots_section(self):
+        self.subplot_label = QLabel("Subplots")
+        self.control_layout.addWidget(self.subplot_label)
+        self.subplot_list = QListWidget()
+        self.control_layout.addWidget(self.subplot_list)
+        self.subplot_label.setVisible(False)
+        self.subplot_list.setVisible(False) 
+
     def _build_axis_limits_section(self):
         """X/Y axis limits (min/max) with centered text."""
         grid = QGridLayout()
@@ -353,6 +367,9 @@ class MainWindow(QMainWindow):
         self.add_file_btn.clicked.connect(self.load_file)
         self.remove_file_btn.clicked.connect(self.remove_selected_file)
 
+        # --- Subplot actions ---
+        self.subplot_list.currentRowChanged.connect(self.on_subplot_selected)
+
         # --- Curve actions ---
         self.add_curve_btn.clicked.connect(self.add_curve)
         self.remove_curve_btn.clicked.connect(self.remove_selected_curve)
@@ -404,12 +421,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def on_xlabel_changed(self):
         """Update config xlabel when user commits the edit."""
-        self.controller.config.xlabel = self.xlabel_edit.text().strip()
+        self.apply_subplot_labels()
         self.controller.update_plot()
 
     def on_ylabel_changed(self):
         """Update config ylabel when user commits the edit."""
-        self.controller.config.ylabel = self.ylabel_edit.text().strip()
+        self.apply_subplot_labels() 
         self.controller.update_plot()
 
     # ------------------------------------------------------------------
@@ -716,6 +733,8 @@ class MainWindow(QMainWindow):
 
         try:
             # Ratio (tuple like (4,3))
+            self.apply_subplot_limits()
+            self.apply_subplot_ticks()
             self.controller.config.ratio = eval(dim_text)
 
             # Limits: empty => None
@@ -740,12 +759,236 @@ class MainWindow(QMainWindow):
             self.controller.update_plot()
             max_index = dlg.get_max_subplot_index()
             self.populate_subplot_indices(max_index)
+            self.refresh_subplot_list()
 
     def populate_subplot_indices(self,max_index):
         self.subplot_index_combo.clear()
         indices = [str(i) for i in range(max_index+1) or "0"]
         self.subplot_index_combo.addItems(indices)
 
+    def refresh_subplot_list(self):
+        rows, cols = self.controller.config.subplot_layout
+        n = rows * cols
+
+        is_subplots = (n > 1)
+        self.subplot_label.setVisible(is_subplots)
+        self.subplot_list.setVisible(is_subplots)
+
+
+        if not is_subplots:
+            self._active_subplot = None
+            self.subplot_list.blockSignals(True)
+            self.subplot_list.clear()
+            self.subplot_list.blockSignals(False)
+            self.subplot_label.setVisible(False)
+            self.subplot_list.setVisible(False)
+            return
+
+        self.subplot_list.blockSignals(True)
+        self.subplot_list.clear()
+        for i in range(n):
+            r, c = divmod(i, cols)
+            self.subplot_list.addItem(f"Subplot {i}  (r{r}, c{c})")
+        self.subplot_list.blockSignals(False)
+
+        # Auto-select 0 if nothing selected
+        if self.subplot_list.currentRow() < 0:
+            self.subplot_list.setCurrentRow(0)
+
+    def on_subplot_selected(self, idx):
+        if idx < 0:
+            self._active_subplot = None
+        else:
+            self._active_subplot = idx
+        subplot_index = self._active_subplot
+        # subplot_config = self.controller.config.subplots_config[subplot_index]
+
+        self.load_axes_widgets()
+
+    def load_axes_widgets(self):
+        cfg = self.controller.config
+
+        if self._active_subplot is None:
+            ov = {}
+        else:
+            ov = cfg.subplots_config.get(self._active_subplot, {})
+        # Block signals to avoid triggering handlers while setting values
+        self.xlabel_edit.blockSignals(True)
+        self.ylabel_edit.blockSignals(True)
+        self.x_min_edit.blockSignals(True)
+        self.x_max_edit.blockSignals(True)
+        self.y_min_edit.blockSignals(True)
+        self.y_max_edit.blockSignals(True)
+        self.x_ticks_edit.blockSignals(True)
+        self.y_ticks_edit.blockSignals(True)
+
+
+
+        xlabel = ov.get("xlabel", cfg.xlabel)
+        ylabel = ov.get("ylabel", cfg.ylabel)
+        xlim   = ov.get("xlim", cfg.xlimits)
+        ylim   = ov.get("ylim", cfg.ylimits)
+        xtN    = ov.get("xticksN", cfg.xticksN)
+        ytN    = ov.get("yticksN", cfg.yticksN)
+
+        # --- fill widgets ---
+        self.xlabel_edit.setText(xlabel or "")
+        self.ylabel_edit.setText(ylabel or "")
+
+        self.x_min_edit.setText("" if not xlim or xlim[0] is None else str(xlim[0]))
+        self.x_max_edit.setText("" if not xlim or xlim[1] is None else str(xlim[1]))
+        self.y_min_edit.setText("" if not ylim or ylim[0] is None else str(ylim[0]))
+        self.y_max_edit.setText("" if not ylim or ylim[1] is None else str(ylim[1]))
+
+        if xtN is not None:
+            self.x_ticks_edit.setValue(int(xtN))
+        if ytN is not None:
+            self.y_ticks_edit.setValue(int(ytN))
+
+        # Unblock signals
+        self.xlabel_edit.blockSignals(False)
+        self.ylabel_edit.blockSignals(False)
+        self.x_min_edit.blockSignals(False)
+        self.x_max_edit.blockSignals(False)
+        self.y_min_edit.blockSignals(False)
+        self.y_max_edit.blockSignals(False)
+        self.x_ticks_edit.blockSignals(False)
+        self.y_ticks_edit.blockSignals(False)
+
+    def apply_subplot_labels(self):
+        cfg = self.controller.config
+
+        xtext = self.xlabel_edit.text().strip()
+        ytext = self.ylabel_edit.text().strip()
+
+        # No subplot selected -> write global
+        if self._active_subplot is None:
+            cfg.xlabel = xtext
+            cfg.ylabel = ytext
+            return
+
+        rows, cols = cfg.subplot_layout
+        i0 = int(self._active_subplot)
+        r0, c0 = divmod(i0, cols)
+
+        # ---- X label handling ----
+        if cfg.shared_x:
+            # shared_x => xlabel is per COLUMN
+            for r in range(rows):
+                i = r * cols + c0
+                ov = cfg.subplots_config.setdefault(i, {})
+                ov["xlabel"] = xtext
+        else:
+            ov = cfg.subplots_config.setdefault(i0, {})
+            ov["xlabel"] = xtext
+
+        # ---- Y label handling ----
+        if cfg.shared_y:
+            # shared_y => ylabel is per ROW (symmetry; change if you prefer per column)
+            for c in range(cols):
+                i = r0 * cols + c
+                ov = cfg.subplots_config.setdefault(i, {})
+                ov["ylabel"] = ytext
+        else:
+            ov = cfg.subplots_config.setdefault(i0, {})
+            ov["ylabel"] = ytext
+
+    def apply_subplot_limits(self):
+        cfg = self.controller.config
+
+        xmin_text = self.x_min_edit.text().strip()
+        xmax_text = self.x_max_edit.text().strip()
+        ymin_text = self.y_min_edit.text().strip()
+        ymax_text = self.y_max_edit.text().strip()
+
+        # No subplot selected -> write global
+        if self._active_subplot is None:
+            cfg.xlimits = (
+                float(xmin_text) if xmin_text else None,
+                float(xmax_text) if xmax_text else None,
+            )
+            cfg.ylimits = (
+                float(ymin_text) if ymin_text else None,
+                float(ymax_text) if ymax_text else None,
+            )
+            return
+
+        rows, cols = cfg.subplot_layout
+        i0 = int(self._active_subplot)
+        r0, c0 = divmod(i0, cols)
+
+        # ---- X limits handling ----
+        if cfg.shared_x:
+            # shared_x => xlimits is per COLUMN
+            for r in range(rows):
+                i = r * cols + c0
+                ov = cfg.subplots_config.setdefault(i, {})
+                ov["xlim"] = (
+                    float(xmin_text) if xmin_text else None,
+                    float(xmax_text) if xmax_text else None,
+                )
+        else:
+            ov = cfg.subplots_config.setdefault(i0, {})
+            ov["xlim"] = (
+                float(xmin_text) if xmin_text else None,
+                float(xmax_text) if xmax_text else None,
+            )
+
+        # ---- Y limits handling ----
+        if cfg.shared_y:
+            # shared_y => ylimits is per ROW
+            for c in range(cols):
+                i = r0 * cols + c
+                ov = cfg.subplots_config.setdefault(i, {})
+                ov["ylim"] = (
+                    float(ymin_text) if ymin_text else None,
+                    float(ymax_text) if ymax_text else None,
+                )
+        else:
+            ov = cfg.subplots_config.setdefault(i0, {})
+            ov["ylim"] = (
+                float(ymin_text) if ymin_text else None,
+                float(ymax_text) if ymax_text else None,
+            )
+        print(cfg.subplots_config)
+        
+    def apply_subplot_ticks(self):
+        cfg = self.controller.config
+
+        xtN = self.x_ticks_edit.value()
+        ytN = self.y_ticks_edit.value()
+
+        # No subplot selected -> write global
+        if self._active_subplot is None:
+            cfg.xticksN = xtN
+            cfg.yticksN = ytN
+            return
+
+        rows, cols = cfg.subplot_layout
+        i0 = int(self._active_subplot)
+        r0, c0 = divmod(i0, cols)
+
+        # ---- X ticks handling ----
+        if cfg.shared_x:
+            # shared_x => xticksN is per COLUMN
+            for r in range(rows):
+                i = r * cols + c0
+                ov = cfg.subplots_config.setdefault(i, {})
+                ov["xticksN"] = xtN
+        else:
+            ov = cfg.subplots_config.setdefault(i0, {})
+            ov["xticksN"] = xtN
+
+        # ---- Y ticks handling ----
+        if cfg.shared_y:
+            # shared_y => yticksN is per ROW
+            for c in range(cols):
+                i = r0 * cols + c
+                ov = cfg.subplots_config.setdefault(i, {})
+                ov["yticksN"] = ytN
+        else:
+            ov = cfg.subplots_config.setdefault(i0, {})
+            ov["yticksN"] = ytN
     def save_project(self):
         path, _ = QFileDialog.getSaveFileName(
             self, "Save plot project", "", "Plot Project (*.pproj *.json)"
@@ -769,6 +1012,9 @@ class MainWindow(QMainWindow):
         self.refresh_files_list()
         self.populate_all_columns()
         self.refresh_curve_list()
+        self.refresh_subplot_list()
+        self.xlabel_edit.setText(self.controller.config.xlabel)
+        self.ylabel_edit.setText(self.controller.config.ylabel)
         if self.controller.curves:
             self.curve_list.setCurrentRow(0)
             self.on_curve_selected(0)
