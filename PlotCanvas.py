@@ -52,6 +52,7 @@ class PlotCanvas(FigureCanvas):
         # 1) Create/clear axes
         self.clear(config.subplot_layout, config)   # your clear() handles fig.subplots + clearing
 
+        print("subplot_layout:", config.subplot_layout, "n_axes:", len(self.axes))
 
         # 2) Plot curves in their subplot
         for curve in curves:

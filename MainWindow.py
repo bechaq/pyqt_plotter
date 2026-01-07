@@ -32,6 +32,7 @@ from Color_modules import (
 )
 from DataFile import load_data_file
 from AdvancedDialog import *
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 
 class MainWindow(QMainWindow): 
     def __init__(self):
@@ -45,6 +46,8 @@ class MainWindow(QMainWindow):
 
         self.canvas = PlotCanvas()
         self.controller = AppController(self.canvas)
+
+    
 
         # -------------------------
         # Debounced redraw on resize
@@ -102,8 +105,20 @@ class MainWindow(QMainWindow):
         scroll_area.setWidget(control_container)
 
         # Add to main layout
+        # Left: controls
         self.main_layout.addWidget(scroll_area, 1)
-        self.main_layout.addWidget(self.canvas, 3)
+
+        # Right: toolbar + canvas stacked vertically
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+
+        self.main_layout.addWidget(right_panel, 3)
+
+        # Store for later use
+        self._right_layout = right_layout
+
 
 
         # Build control sections (top → bottom)
@@ -122,6 +137,9 @@ class MainWindow(QMainWindow):
 
         self.control_layout.addStretch()
 
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        self._right_layout.addWidget(self.toolbar, 0)
+        self._right_layout.addWidget(self.canvas, 1)
     # -------------------------
     # Sections
     # -------------------------
@@ -660,6 +678,8 @@ class MainWindow(QMainWindow):
     # Curve edits -> controller update
     # ------------------------------------------------------------------
     def on_curve_settings_changed(self, *args):
+        print("curve settings changed -> subplot_index_combo =", self.subplot_index_combo.currentText())
+
         """
         Called when any curve setting widget changes.
         Updates the currently selected curve in the controller.
@@ -755,16 +775,23 @@ class MainWindow(QMainWindow):
     def open_advanced_dialog(self):
         dlg = AdvancedDialog(self.controller.config, parent=self)
         if dlg.exec_() == QDialog.Accepted:
+
             dlg.apply_to_config()
             self.controller.update_plot()
             max_index = dlg.get_max_subplot_index()
             self.populate_subplot_indices(max_index)
             self.refresh_subplot_list()
 
-    def populate_subplot_indices(self,max_index):
-        self.subplot_index_combo.clear()
-        indices = [str(i) for i in range(max_index+1) or "0"]
-        self.subplot_index_combo.addItems(indices)
+    def populate_subplot_indices(self, max_index):
+        self.subplot_index_combo.blockSignals(True)
+        try:
+            current = self.subplot_index_combo.currentText()
+            self.subplot_index_combo.clear()
+            self.subplot_index_combo.addItems([str(i) for i in range(max_index + 1)])
+            if current:
+                self.subplot_index_combo.setCurrentText(current)
+        finally:
+            self.subplot_index_combo.blockSignals(False)
 
     def refresh_subplot_list(self):
         rows, cols = self.controller.config.subplot_layout
