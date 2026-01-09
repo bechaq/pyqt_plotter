@@ -123,14 +123,14 @@ class MainWindow(QMainWindow):
 
         # Build control sections (top → bottom)
         self._build_files_section()
-        self._build_axis_labels_section()
+        # self._build_axis_labels_section()
         self._build_dimension_section()
         self._build_subplots_section()
         self._build_curves_section()
         self._build_color_section()
         self._build_marker_section()
         self._build_line_section()
-        self._build_axis_limits_section()
+        # self._build_axis_limits_section()
         self._build_ticks_section()
         # self._build_grid_section()
         self._build_actions_section()
@@ -140,6 +140,9 @@ class MainWindow(QMainWindow):
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self._right_layout.addWidget(self.toolbar, 0)
         self._right_layout.addWidget(self.canvas, 1)
+        self._mpl_label_sync_guard = False
+        self.canvas.mpl_connect("draw_event", self._sync_labels_from_mpl)
+
     # -------------------------
     # Sections
     # -------------------------
@@ -154,7 +157,7 @@ class MainWindow(QMainWindow):
         self.control_layout.addWidget(QLabel("Files"))
         self.files_list = QListWidget()
         self.control_layout.addWidget(self.files_list)
-
+        
     def _build_axis_labels_section(self):
         """X/Y axis label edits (two columns)."""
         grid = QGridLayout()
@@ -201,23 +204,42 @@ class MainWindow(QMainWindow):
         self.curve_name_edit = QLineEdit()
         self.control_layout.addWidget(self.curve_name_edit)
 
-        self.control_layout.addWidget(QLabel("X column"))
+        xy_layout = QHBoxLayout()
+        # X column
+        x_layout = QVBoxLayout()
+        x_layout.addWidget(QLabel("X column"))
         self.x_combo = QComboBox()
-        self.control_layout.addWidget(self.x_combo)
+        x_layout.addWidget(self.x_combo)
 
-        self.control_layout.addWidget(QLabel("Y column"))
+        # Y column
+        y_layout = QVBoxLayout()
+        y_layout.addWidget(QLabel("Y column"))
         self.y_combo = QComboBox()
-        self.control_layout.addWidget(self.y_combo)
+        y_layout.addWidget(self.y_combo)
 
-        self.control_layout.addWidget(QLabel("Axis"))
+        xy_layout.addLayout(x_layout)
+        xy_layout.addLayout(y_layout)
+
+        self.control_layout.addLayout(xy_layout)
+
+        axis_subplot_layout = QHBoxLayout()
+
+        axis_layout =  QVBoxLayout()
+        axis_layout.addWidget(QLabel("Axis"))
+        axis_subplot_layout.addLayout(axis_layout)
         self.axis_combo = QComboBox()
         self.axis_combo.addItems(["primary", "secondary"])
-        self.control_layout.addWidget(self.axis_combo)
+        axis_layout.addWidget(self.axis_combo)
 
-        self.control_layout.addWidget(QLabel("Subplot index"))
+        subplot_layout = QVBoxLayout()
+        subplot_layout.addWidget(QLabel("Subplot index"))
+        axis_subplot_layout.addLayout(subplot_layout)
         self.subplot_index_combo = QComboBox()
-        self.subplot_index_combo.addItems(["0","1","2","3","4"])
-        self.control_layout.addWidget(self.subplot_index_combo)
+        self.subplot_index_combo.addItems(["0"])
+        subplot_layout.addWidget(self.subplot_index_combo)
+
+        self.control_layout.addLayout(axis_subplot_layout)
+        
 
     def _build_color_section(self):
         """Palette selection + swatch combo for curve color."""
@@ -395,8 +417,8 @@ class MainWindow(QMainWindow):
 
         # --- Axis label edits ---
         # editingFinished emits no args; we read the QLineEdit text in handler
-        self.xlabel_edit.editingFinished.connect(self.on_xlabel_changed)
-        self.ylabel_edit.editingFinished.connect(self.on_ylabel_changed)
+        # self.xlabel_edit.editingFinished.connect(self.on_xlabel_changed)
+        # self.ylabel_edit.editingFinished.connect(self.on_ylabel_changed)
 
         # --- Subplot index ---
         self.subplot_index_combo.currentTextChanged.connect(self.on_curve_settings_changed)
@@ -418,10 +440,10 @@ class MainWindow(QMainWindow):
 
         # --- Canvas settings ---
         self.dimension_combo.currentTextChanged.connect(self.on_canvas_settings_changed)
-        self.x_min_edit.editingFinished.connect(self.on_canvas_settings_changed)
-        self.x_max_edit.editingFinished.connect(self.on_canvas_settings_changed)
-        self.y_min_edit.editingFinished.connect(self.on_canvas_settings_changed)
-        self.y_max_edit.editingFinished.connect(self.on_canvas_settings_changed)
+        # self.x_min_edit.editingFinished.connect(self.on_canvas_settings_changed)
+        # self.x_max_edit.editingFinished.connect(self.on_canvas_settings_changed)
+        # self.y_min_edit.editingFinished.connect(self.on_canvas_settings_changed)
+        # self.y_max_edit.editingFinished.connect(self.on_canvas_settings_changed)
         self.x_ticks_edit.valueChanged.connect(self.on_canvas_settings_changed)
         self.y_ticks_edit.valueChanged.connect(self.on_canvas_settings_changed)
         # self.minor_ticks_checkbox.stateChanged.connect(self.on_canvas_settings_changed)
@@ -678,7 +700,6 @@ class MainWindow(QMainWindow):
     # Curve edits -> controller update
     # ------------------------------------------------------------------
     def on_curve_settings_changed(self, *args):
-        print("curve settings changed -> subplot_index_combo =", self.subplot_index_combo.currentText())
 
         """
         Called when any curve setting widget changes.
@@ -739,13 +760,13 @@ class MainWindow(QMainWindow):
         """
         dim_text = self.dimension_combo.currentText()
 
-        xmin_text = self.x_min_edit.text().strip()
-        xmax_text = self.x_max_edit.text().strip()
-        ymin_text = self.y_min_edit.text().strip()
-        ymax_text = self.y_max_edit.text().strip()
+        # xmin_text = self.x_min_edit.text().strip()
+        # xmax_text = self.x_max_edit.text().strip()
+        # ymin_text = self.y_min_edit.text().strip()
+        # ymax_text = self.y_max_edit.text().strip()
 
-        self.controller.config.xticksN = self.x_ticks_edit.value()
-        self.controller.config.yticksN = self.y_ticks_edit.value()
+        # self.controller.config.xticksN = self.x_ticks_edit.value()
+        # self.controller.config.yticksN = self.y_ticks_edit.value()
         # self.controller.config.minor_ticks = self.minor_ticks_checkbox.isChecked()
         # self.controller.config.minor_grid = self.minor_ticks_checkbox.isChecked()
         # self.controller.config.grid = self.major_grid_checkbox.isChecked()
@@ -753,19 +774,19 @@ class MainWindow(QMainWindow):
 
         try:
             # Ratio (tuple like (4,3))
-            self.apply_subplot_limits()
+            # self.apply_subplot_limits()
             self.apply_subplot_ticks()
             self.controller.config.ratio = eval(dim_text)
 
             # Limits: empty => None
-            self.controller.config.xlimits = (
-                float(xmin_text) if xmin_text else None,
-                float(xmax_text) if xmax_text else None,
-            )
-            self.controller.config.ylimits = (
-                float(ymin_text) if ymin_text else None,
-                float(ymax_text) if ymax_text else None,
-            )
+            # self.controller.config.xlimits = (
+            #     float(xmin_text) if xmin_text else None,
+            #     float(xmax_text) if xmax_text else None,
+            # )
+            # self.controller.config.ylimits = (
+            #     float(ymin_text) if ymin_text else None,
+            #     float(ymax_text) if ymax_text else None,
+            # )
 
             self.controller.update_plot()
         except Exception:
@@ -840,32 +861,32 @@ class MainWindow(QMainWindow):
         else:
             ov = cfg.subplots_config.get(self._active_subplot, {})
         # Block signals to avoid triggering handlers while setting values
-        self.xlabel_edit.blockSignals(True)
-        self.ylabel_edit.blockSignals(True)
-        self.x_min_edit.blockSignals(True)
-        self.x_max_edit.blockSignals(True)
-        self.y_min_edit.blockSignals(True)
-        self.y_max_edit.blockSignals(True)
+        # self.xlabel_edit.blockSignals(True)
+        # self.ylabel_edit.blockSignals(True)
+        # self.x_min_edit.blockSignals(True)
+        # self.x_max_edit.blockSignals(True)
+        # self.y_min_edit.blockSignals(True)
+        # self.y_max_edit.blockSignals(True)
         self.x_ticks_edit.blockSignals(True)
         self.y_ticks_edit.blockSignals(True)
 
 
 
-        xlabel = ov.get("xlabel", cfg.xlabel)
-        ylabel = ov.get("ylabel", cfg.ylabel)
-        xlim   = ov.get("xlim", cfg.xlimits)
-        ylim   = ov.get("ylim", cfg.ylimits)
+        # xlabel = ov.get("xlabel", cfg.xlabel)
+        # ylabel = ov.get("ylabel", cfg.ylabel)
+        # xlim   = ov.get("xlim", cfg.xlimits)
+        # ylim   = ov.get("ylim", cfg.ylimits)
         xtN    = ov.get("xticksN", cfg.xticksN)
         ytN    = ov.get("yticksN", cfg.yticksN)
 
         # --- fill widgets ---
-        self.xlabel_edit.setText(xlabel or "")
-        self.ylabel_edit.setText(ylabel or "")
+        # self.xlabel_edit.setText(xlabel or "")
+        # self.ylabel_edit.setText(ylabel or "")
 
-        self.x_min_edit.setText("" if not xlim or xlim[0] is None else str(xlim[0]))
-        self.x_max_edit.setText("" if not xlim or xlim[1] is None else str(xlim[1]))
-        self.y_min_edit.setText("" if not ylim or ylim[0] is None else str(ylim[0]))
-        self.y_max_edit.setText("" if not ylim or ylim[1] is None else str(ylim[1]))
+        # self.x_min_edit.setText("" if not xlim or xlim[0] is None else str(xlim[0]))
+        # self.x_max_edit.setText("" if not xlim or xlim[1] is None else str(xlim[1]))
+        # self.y_min_edit.setText("" if not ylim or ylim[0] is None else str(ylim[0]))
+        # self.y_max_edit.setText("" if not ylim or ylim[1] is None else str(ylim[1]))
 
         if xtN is not None:
             self.x_ticks_edit.setValue(int(xtN))
@@ -873,25 +894,25 @@ class MainWindow(QMainWindow):
             self.y_ticks_edit.setValue(int(ytN))
 
         # Unblock signals
-        self.xlabel_edit.blockSignals(False)
-        self.ylabel_edit.blockSignals(False)
-        self.x_min_edit.blockSignals(False)
-        self.x_max_edit.blockSignals(False)
-        self.y_min_edit.blockSignals(False)
-        self.y_max_edit.blockSignals(False)
+        # self.xlabel_edit.blockSignals(False)
+        # self.ylabel_edit.blockSignals(False)
+        # self.x_min_edit.blockSignals(False)
+        # self.x_max_edit.blockSignals(False)
+        # self.y_min_edit.blockSignals(False)
+        # self.y_max_edit.blockSignals(False)
         self.x_ticks_edit.blockSignals(False)
         self.y_ticks_edit.blockSignals(False)
 
     def apply_subplot_labels(self):
         cfg = self.controller.config
 
-        xtext = self.xlabel_edit.text().strip()
-        ytext = self.ylabel_edit.text().strip()
+        # xtext = self.xlabel_edit.text().strip()
+        # ytext = self.ylabel_edit.text().strip()
 
         # No subplot selected -> write global
         if self._active_subplot is None:
-            cfg.xlabel = xtext
-            cfg.ylabel = ytext
+            # cfg.xlabel = xtext
+            # cfg.ylabel = ytext
             return
 
         rows, cols = cfg.subplot_layout
@@ -899,34 +920,34 @@ class MainWindow(QMainWindow):
         r0, c0 = divmod(i0, cols)
 
         # ---- X label handling ----
-        if cfg.shared_x:
-            # shared_x => xlabel is per COLUMN
-            for r in range(rows):
-                i = r * cols + c0
-                ov = cfg.subplots_config.setdefault(i, {})
-                ov["xlabel"] = xtext
-        else:
-            ov = cfg.subplots_config.setdefault(i0, {})
-            ov["xlabel"] = xtext
+        # if cfg.shared_x:
+        #     # shared_x => xlabel is per COLUMN
+        #     for r in range(rows):
+        #         i = r * cols + c0
+        #         ov = cfg.subplots_config.setdefault(i, {})
+        #         # ov["xlabel"] = xtext
+        # else:
+        #     ov = cfg.subplots_config.setdefault(i0, {})
+        #     ov["xlabel"] = xtext
 
         # ---- Y label handling ----
-        if cfg.shared_y:
-            # shared_y => ylabel is per ROW (symmetry; change if you prefer per column)
-            for c in range(cols):
-                i = r0 * cols + c
-                ov = cfg.subplots_config.setdefault(i, {})
-                ov["ylabel"] = ytext
-        else:
-            ov = cfg.subplots_config.setdefault(i0, {})
-            ov["ylabel"] = ytext
+        # if cfg.shared_y:
+        #     # shared_y => ylabel is per ROW (symmetry; change if you prefer per column)
+        #     for c in range(cols):
+        #         i = r0 * cols + c
+        #         ov = cfg.subplots_config.setdefault(i, {})
+        #         ov["ylabel"] = ytext
+        # else:
+            # ov = cfg.subplots_config.setdefault(i0, {})
+            # ov["ylabel"] = ytext
 
     def apply_subplot_limits(self):
         cfg = self.controller.config
 
-        xmin_text = self.x_min_edit.text().strip()
-        xmax_text = self.x_max_edit.text().strip()
-        ymin_text = self.y_min_edit.text().strip()
-        ymax_text = self.y_max_edit.text().strip()
+        # xmin_text = self.x_min_edit.text().strip()
+        # xmax_text = self.x_max_edit.text().strip()
+        # ymin_text = self.y_min_edit.text().strip()
+        # ymax_text = self.y_max_edit.text().strip()
 
         # No subplot selected -> write global
         if self._active_subplot is None:
@@ -977,20 +998,16 @@ class MainWindow(QMainWindow):
                 float(ymin_text) if ymin_text else None,
                 float(ymax_text) if ymax_text else None,
             )
-        print(cfg.subplots_config)
         
     def apply_subplot_ticks(self):
         cfg = self.controller.config
-
         xtN = self.x_ticks_edit.value()
         ytN = self.y_ticks_edit.value()
-
         # No subplot selected -> write global
         if self._active_subplot is None:
             cfg.xticksN = xtN
             cfg.yticksN = ytN
             return
-
         rows, cols = cfg.subplot_layout
         i0 = int(self._active_subplot)
         r0, c0 = divmod(i0, cols)
@@ -1016,6 +1033,86 @@ class MainWindow(QMainWindow):
         else:
             ov = cfg.subplots_config.setdefault(i0, {})
             ov["yticksN"] = ytN
+    
+    def _sync_labels_from_mpl(self, event=None):
+        """
+        Pull current X/Y labels from Matplotlib into PlotConfig.
+        Only labels. No limits/ticks/scales.
+        """
+        if self._mpl_label_sync_guard:
+            return
+        self._mpl_label_sync_guard = True
+        try:
+            cfg = self.controller.config
+            axes = getattr(self.canvas, "axes", [])
+            if not axes:
+                return
+
+            rows, cols = cfg.subplot_layout
+
+            # -------------------------
+            # X LABELS
+            # -------------------------
+            if cfg.shared_x:
+                # In your plotting code, only bottom row shows xlabel.
+                bottom_r = rows - 1
+                for c in range(cols):
+                    i_bottom = bottom_r * cols + c
+                    if i_bottom >= len(axes):
+                        continue
+                    xlab = axes[i_bottom].get_xlabel()
+
+                    # store per column in subplots_config (your apply_subplot_labels logic style)
+                    for r in range(rows):
+                        i = r * cols + c
+                        cfg.subplots_config.setdefault(i, {})["xlabel"] = xlab
+
+                # keep a global fallback
+                cfg.xlabel = axes[(rows - 1) * cols].get_xlabel() or cfg.xlabel
+
+            else:
+                # per subplot
+                for i, ax in enumerate(axes):
+                    cfg.subplots_config.setdefault(i, {})["xlabel"] = ax.get_xlabel()
+                    
+
+                cfg.xlabel = axes[0].get_xlabel() or cfg.xlabel
+
+
+            # -------------------------
+            # Y LABELS
+            # -------------------------
+            if cfg.shared_y:
+                # You treat shared_y as "per row" (see your apply_subplot_labels)
+                for r in range(rows):
+                    i_left = r * cols
+                    if i_left >= len(axes):
+                        continue
+                    ylab = axes[i_left].get_ylabel()
+
+                    for c in range(cols):
+                        i = r * cols + c
+                        cfg.subplots_config.setdefault(i, {})["ylabel"] = ylab
+
+                cfg.ylabel = axes[0].get_ylabel() or cfg.ylabel
+
+            else:
+                # per subplot
+                for i, ax in enumerate(axes):
+                    cfg.subplots_config.setdefault(i, {})["ylabel"] = ax.get_ylabel()
+
+                cfg.ylabel = axes[0].get_ylabel() or cfg.ylabel
+
+        finally:
+            self._mpl_label_sync_guard = False
+        # XY limits
+        for i, ax in enumerate(getattr(self.canvas, "axes", [])):
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            cfg.subplots_config.setdefault(i, {})["xlim"] = (xlim[0], xlim[1])
+            cfg.subplots_config.setdefault(i, {})["ylim"] = (ylim[0], ylim[1])
+
+    
     def save_project(self):
         path, _ = QFileDialog.getSaveFileName(
             self, "Save plot project", "", "Plot Project (*.pproj *.json)"
@@ -1040,8 +1137,8 @@ class MainWindow(QMainWindow):
         self.populate_all_columns()
         self.refresh_curve_list()
         self.refresh_subplot_list()
-        self.xlabel_edit.setText(self.controller.config.xlabel)
-        self.ylabel_edit.setText(self.controller.config.ylabel)
+        # self.xlabel_edit.setText(self.controller.config.xlabel)
+        # self.ylabel_edit.setText(self.controller.config.ylabel)
         if self.controller.curves:
             self.curve_list.setCurrentRow(0)
             self.on_curve_selected(0)

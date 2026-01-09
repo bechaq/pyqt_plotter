@@ -4,8 +4,8 @@
     "test_data.txt": "C:/Users/bench/OneDrive/Documents/\u00c9cole/Code/pyqt_plotter/test_data.txt"
   },
   "config": {
-    "xlabel": "X",
-    "ylabel": "Y",
+    "xlabel": "X test",
+    "ylabel": "Y nani",
     "ratio": [
       1,
       1
@@ -26,12 +26,21 @@
     "yticksN": null,
     "palette_name": "Plotly",
     "subplot_layout": [
-      3,
+      1,
       1
     ],
-    "shared_x": true,
+    "shared_x": false,
     "shared_y": false,
-    "subplots_config": {}
+    "subplots_config": {
+      "0": {
+        "xlabel": "X test",
+        "ylabel": "Y nani",
+        "xlim": null,
+        "ylim": null,
+        "xticksN": null,
+        "yticksN": null
+      }
+    }
   },
   "curves": [
     {
@@ -47,7 +56,7 @@
       "marker_size": 5,
       "linestyle": "-",
       "linewidth": 2.0,
-      "subplot_index": 1
+      "subplot_index": 0
     }
   ]
 }

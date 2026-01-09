@@ -1,60 +1,110 @@
 {
   "version": 1,
   "data_files": {
-    "test_data.txt": "C:/Users/bench/OneDrive/Documents/\u00c9cole/Code/pyqt_plotter/test_data.txt",
-    "test_data2.txt": "C:/Users/bench/OneDrive/Documents/\u00c9cole/Code/pyqt_plotter/test_data2.txt"
+    "test_data.txt": "C:/Users/bench/OneDrive/Documents/\u00c9cole/Code/pyqt_plotter/test_data.txt"
   },
   "config": {
-    "xlabel": "nsjdf",
-    "ylabel": "caca",
+    "xlabel": "X",
+    "ylabel": "Y",
     "ratio": [
       1,
       1
     ],
     "xlimits": [
-      2.0,
-      8.0
+      null,
+      null
     ],
     "ylimits": [
       null,
       null
     ],
     "grid": true,
-    "minor_ticks": true,
-    "minor_grid": true,
+    "minor_ticks": false,
+    "minor_grid": false,
     "legend": true,
-    "xticksN": 5,
-    "yticksN": 5,
-    "palette_name": "Plotly"
+    "xticksN": null,
+    "yticksN": null,
+    "palette_name": "Plotly",
+    "subplot_layout": [
+      2,
+      2
+    ],
+    "shared_x": false,
+    "shared_y": false,
+    "subplots_config": {
+      "0": {
+        "xlabel": "X",
+        "ylabel": "Y",
+        "xlim": [
+          0.4893041933740059,
+          2.489304193374006
+        ],
+        "ylim": [
+          0.7940432705816243,
+          1.7940432705816243
+        ],
+        "xticksN": null,
+        "yticksN": null
+      },
+      "1": {
+        "xlabel": "X",
+        "ylabel": "Y",
+        "xlim": [
+          0.0,
+          1.0
+        ],
+        "ylim": [
+          0.0,
+          1.0
+        ],
+        "xticksN": null,
+        "yticksN": null
+      },
+      "2": {
+        "xlabel": "X",
+        "ylabel": "Y",
+        "xlim": [
+          -2.0,
+          1.0
+        ],
+        "ylim": [
+          0.0,
+          1.0
+        ],
+        "xticksN": null,
+        "yticksN": null
+      },
+      "3": {
+        "xlabel": "X",
+        "ylabel": "Y",
+        "xlim": [
+          0.0,
+          1.0
+        ],
+        "ylim": [
+          0.0,
+          1.0
+        ],
+        "xticksN": null,
+        "yticksN": null
+      }
+    }
   },
   "curves": [
     {
-      "name": "naninan",
-      "axis": "primary",
-      "x_file": "test_data.txt",
-      "x_col": "Column1",
-      "y_file": "test_data2.txt",
-      "y_col": "Column3",
-      "color": "#31688E",
-      "palette_name": "Viridis",
-      "marker": "None",
-      "marker_size": 5,
-      "linestyle": "-",
-      "linewidth": 2.0
-    },
-    {
-      "name": "Curve 2",
+      "name": "Curve 1",
       "axis": "primary",
       "x_file": "test_data.txt",
       "x_col": "Column1",
       "y_file": "test_data.txt",
-      "y_col": "Column3",
-      "color": "#19D3F3",
+      "y_col": "Column1",
+      "color": "#636EFA",
       "palette_name": "Plotly",
-      "marker": "o",
-      "marker_size": 15,
-      "linestyle": "--",
-      "linewidth": 3.0
+      "marker": "None",
+      "marker_size": 5,
+      "linestyle": "-",
+      "linewidth": 2.0,
+      "subplot_index": 0
     }
   ]
 }

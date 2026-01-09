@@ -12,8 +12,8 @@ class PlotConfig:
         self.dirty = False
         self.xlimits = None  # (min, max) or None
         self.ylimits = None  # (min, max) or None
-        self.xticksN = None  # number of ticks or None
-        self.yticksN = None  # number of ticks or None
+        self.xticksN = 6  # number of ticks or None
+        self.yticksN = 6  # number of ticks or None
         self.subplots = False  # number of subplots
         self.subplot_layout = (1, 1)  # (rows, cols) if subplots is True
         self.shared_x = False

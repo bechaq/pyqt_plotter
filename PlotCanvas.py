@@ -11,7 +11,7 @@ class PlotCanvas(FigureCanvas):
         self._last_layout = None
         self._last_shared_x = None
         self._last_shared_y = None
-
+     #### Premiere fois, creer subplot par defaut et ov par defaut, ensuite xtickN change pas
         super().__init__(self.fig)
         
     def clear(self, layout, config):
@@ -19,6 +19,7 @@ class PlotCanvas(FigureCanvas):
         self._last_layout != layout
         or self._last_shared_x != config.shared_x
         or self._last_shared_y != config.shared_y
+
     )
 
         if need_rebuild:
@@ -26,6 +27,7 @@ class PlotCanvas(FigureCanvas):
             self._last_layout = layout
             self._last_shared_x = config.shared_x
             self._last_shared_y = config.shared_y
+            
         else:
             for ax in self.axes:
                 ax.clear()
@@ -52,7 +54,6 @@ class PlotCanvas(FigureCanvas):
         # 1) Create/clear axes
         self.clear(config.subplot_layout, config)   # your clear() handles fig.subplots + clearing
 
-        print("subplot_layout:", config.subplot_layout, "n_axes:", len(self.axes))
 
         # 2) Plot curves in their subplot
         for curve in curves:
@@ -80,8 +81,7 @@ class PlotCanvas(FigureCanvas):
             ov = config.subplots_config.get(i, {})
             rows, cols = config.subplot_layout
             r, c = divmod(i, cols)
-
-
+      
             # shared_x rule: xlabel/xlim/xticks must be global
             if config.shared_x:
                 if r == rows-1:  # bottom row
@@ -90,18 +90,18 @@ class PlotCanvas(FigureCanvas):
                     ax.set_xlabel("")
                     ax.tick_params(labelbottom=False)
 
-                xlim = ov.get("xlim", config.xlimits)
-                xtN  = ov.get("xticksN", config.xticksN)
+                xlim = ov.get("xlim", config.xlimits) or config.xlimits
+                xtN  = ov.get("xticksN", config.xticksN) or config.xticksN
             else:
                 ax.set_xlabel(ov.get("xlabel", config.xlabel))
 
-                xlim = ov.get("xlim", config.xlimits)
-                xtN  = ov.get("xticksN", config.xticksN)
-
+                xlim = ov.get("xlim", config.xlimits) or config.xlimits
+                xtN  = ov.get("xticksN", config.xticksN) or config.xticksN
+                
             # y is per subplot (unless you later decide shared_y similar)
             ax.set_ylabel(ov.get("ylabel", config.ylabel))
-            ylim = ov.get("ylim", config.ylimits)
-            ytN  = ov.get("yticksN", config.yticksN)
+            ylim = ov.get("ylim", config.ylimits) or config.ylimits
+            ytN  = ov.get("yticksN", config.yticksN) or config.yticksN
 
             if xlim is not None: ax.set_xlim(xlim)
             if ylim is not None: ax.set_ylim(ylim)
@@ -166,12 +166,15 @@ class PlotCanvas(FigureCanvas):
             # ---- Legend ----
             if config.legend:
                 h, l = ax.get_legend_handles_labels()
+                
                 if ax2 is not None:
                     h2, l2 = ax2.get_legend_handles_labels()
                     h += h2
                     l += l2
+                
                 if h:
-                    ax.legend(h, l)
+                    legend = ax.legend(h, l)
+                    legend.set_draggable(True)
 
         # Size
         w, h = self.ratio_to_inches(config.ratio)
@@ -215,22 +218,3 @@ class PlotCanvas(FigureCanvas):
         # flatten → axs[0], axs[1], ...
         self.axes = list(axs.flat) if hasattr(axs, "flat") else [axs]
         self.ax2.clear()
-
-        # Create a default config dict for each subplot (if missing)
-        if config is not None:
-            for i in range(len(self.axes)):
-                ov = config.subplots_config.get(i)
-                if ov is None:
-                    config.subplots_config[i] = {
-                        "xlabel": config.xlabel,
-                        "ylabel": config.ylabel,
-                        "xlim": config.xlimits,
-                        "ylim": config.ylimits,
-                        "xticksN": config.xticksN,
-                        "yticksN": config.yticksN,
-                    }
-                else:
-                    # ensure it is not a shared reference (defensive)
-                    config.subplots_config[i] = dict(ov)
-
-

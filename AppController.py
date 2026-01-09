@@ -152,8 +152,18 @@ class AppController:
         self.config.subplot_layout = tuple(cfg.get("subplot_layout", (1, 1)))
         self.config.shared_x = cfg.get("shared_x", False)
         self.config.shared_y = cfg.get("shared_y", False)
-        self.config.subplots_config = cfg.get("subplots_config", {})
+        
+        raw = cfg.get("subplots_config", {}) or {}
+        fixed = {}
+        for k, v in raw.items():
+            try:
+                fixed[int(k)] = v or {}
+            except Exception:
+                pass
+        self.config.subplots_config = fixed
 
+        # NOW redraw (after keys are correct)
+        self.update_plot()
 
         # Restore curves (only if their referenced files exist)
         for c in obj.get("curves", []):
@@ -164,7 +174,6 @@ class AppController:
 
             curve = self._make_curve_from_dict(c)
             self.curves.append(curve)
-        print(self.config.subplot_layout)
         self.update_plot()
         return missing
 
