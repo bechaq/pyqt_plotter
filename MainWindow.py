@@ -18,7 +18,7 @@ Notes:
 import os
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QListWidget, QLineEdit, QComboBox,
-    QFileDialog, QMessageBox, QHBoxLayout, QVBoxLayout, QGridLayout, QSlider, QCheckBox, QScrollArea
+    QFileDialog, QMessageBox, QHBoxLayout, QVBoxLayout, QGridLayout, QSlider, QCheckBox, QScrollArea, QApplication, QDialog, QAbstractButton,
 )
 from PyQt5.QtCore import Qt, QTimer
 
@@ -34,7 +34,7 @@ from DataFile import load_data_file
 from AdvancedDialog import *
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 
-class MainWindow(QMainWindow): 
+class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
@@ -47,7 +47,7 @@ class MainWindow(QMainWindow):
         self.canvas = PlotCanvas()
         self.controller = AppController(self.canvas)
 
-    
+
 
         # -------------------------
         # Debounced redraw on resize
@@ -128,8 +128,8 @@ class MainWindow(QMainWindow):
         self._build_subplots_section()
         self._build_curves_section()
         self._build_color_section()
-        self._build_marker_section()
-        self._build_line_section()
+        # self._build_marker_section()
+        # self._build_line_section()
         # self._build_axis_limits_section()
         self._build_ticks_section()
         # self._build_grid_section()
@@ -140,8 +140,44 @@ class MainWindow(QMainWindow):
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self._right_layout.addWidget(self.toolbar, 0)
         self._right_layout.addWidget(self.canvas, 1)
+
         self._mpl_label_sync_guard = False
-        self.canvas.mpl_connect("draw_event", self._sync_labels_from_mpl)
+        self._skip_next_draw_event = False
+        # Call sync only when a toolbar action is used
+        for act in self.toolbar.actions():
+            print(act.text())
+            act.triggered.connect(lambda checked=False, a=act: self._on_toolbar_action(a))
+
+    def _on_toolbar_action(self, action):
+        txt = (action.text() or "").strip()
+        if txt == "Customize":
+            # Let MPL create the dialog, then hook its buttons
+            QTimer.singleShot(0, self._hook_customize_dialog)
+
+    def _hook_customize_dialog(self):
+        # Find the top-level dialog Matplotlib just opened
+        dlg = None
+        for w in QApplication.topLevelWidgets():
+            if isinstance(w, QDialog):
+                title = (w.windowTitle() or "").lower()
+                # Matplotlib titles vary by version; these catch the common ones
+                if "customize" in title or "figure options" in title or "edit" in title:
+                    dlg = w
+                    break
+
+        if dlg is None:
+            return
+
+        # Connect Apply/OK buttons
+        for b in dlg.findChildren(QAbstractButton):
+            t = (b.text() or "").strip().lower()
+            if t in ("apply", "&apply", "ok", "&ok"):
+                b.clicked.connect(self._sync_labels_from_mpl)
+                print("Connected customize dialog button:", t)
+
+        # (optional) if you want sync on close too:
+        # dlg.finished.connect(self._sync_from_mpl_and_update_curve_list)
+
 
     # -------------------------
     # Sections
@@ -157,7 +193,7 @@ class MainWindow(QMainWindow):
         self.control_layout.addWidget(QLabel("Files"))
         self.files_list = QListWidget()
         self.control_layout.addWidget(self.files_list)
-        
+
     def _build_axis_labels_section(self):
         """X/Y axis label edits (two columns)."""
         grid = QGridLayout()
@@ -239,7 +275,7 @@ class MainWindow(QMainWindow):
         subplot_layout.addWidget(self.subplot_index_combo)
 
         self.control_layout.addLayout(axis_subplot_layout)
-        
+
 
     def _build_color_section(self):
         """Palette selection + swatch combo for curve color."""
@@ -306,7 +342,7 @@ class MainWindow(QMainWindow):
         self.subplot_list = QListWidget()
         self.control_layout.addWidget(self.subplot_list)
         self.subplot_label.setVisible(False)
-        self.subplot_list.setVisible(False) 
+        self.subplot_list.setVisible(False)
 
     def _build_axis_limits_section(self):
         """X/Y axis limits (min/max) with centered text."""
@@ -331,7 +367,7 @@ class MainWindow(QMainWindow):
         grid.addWidget(self.y_max_edit, 1, 3)
 
         self.control_layout.addLayout(grid)
-    
+
     def _build_ticks_section(self):
         """X/Y axis ticks number."""
         grid = QGridLayout()
@@ -353,7 +389,7 @@ class MainWindow(QMainWindow):
         # grid.addWidget(QLabel("Minor ticks"), 2, 0)
         # self.minor_ticks_checkbox = QCheckBox()
         # grid.addWidget(self.minor_ticks_checkbox, 2, 1)
-        
+
 
         self.control_layout.addLayout(grid)
 
@@ -433,10 +469,10 @@ class MainWindow(QMainWindow):
         self.curve_name_edit.editingFinished.connect(self.on_curve_settings_changed)
 
         self.color_combo.currentTextChanged.connect(self.on_curve_settings_changed)
-        self.marker_combo.currentTextChanged.connect(self.on_curve_settings_changed)
-        self.marker_size_combo.valueChanged.connect(self.on_curve_settings_changed)
-        self.linestyle_combo.currentTextChanged.connect(self.on_curve_settings_changed)
-        self.linewidth_combo.currentTextChanged.connect(self.on_curve_settings_changed)
+        # self.marker_combo.currentTextChanged.connect(self.on_curve_settings_changed)
+        # self.marker_size_combo.valueChanged.connect(self.on_curve_settings_changed)
+        # self.linestyle_combo.currentTextChanged.connect(self.on_curve_settings_changed)
+        # self.linewidth_combo.currentTextChanged.connect(self.on_curve_settings_changed)
 
         # --- Canvas settings ---
         self.dimension_combo.currentTextChanged.connect(self.on_canvas_settings_changed)
@@ -466,7 +502,7 @@ class MainWindow(QMainWindow):
 
     def on_ylabel_changed(self):
         """Update config ylabel when user commits the edit."""
-        self.apply_subplot_labels() 
+        self.apply_subplot_labels()
         self.controller.update_plot()
 
     # ------------------------------------------------------------------
@@ -604,10 +640,10 @@ class MainWindow(QMainWindow):
             self.axis_combo.currentText(),
             selected_color(self.color_combo),
             self.palette_combo.currentText(),
-            self.marker_combo.currentText(),
-            self.marker_size_combo.value(),
-            self.linestyle_combo.currentText(),
-            float(self.linewidth_combo.currentText()),
+            # self.marker_combo.currentText(),
+            # self.marker_size_combo.value(),
+            # linestyle=self.linestyle_combo.currentText(),
+            # linewidth=float(self.linewidth_combo.currentText()),
             x_data_file=x_data_file,
             y_data_file=y_data_file,
         )
@@ -646,8 +682,7 @@ class MainWindow(QMainWindow):
         # Block signals for all widgets we will set
         widgets_to_block = [
             self.x_combo, self.y_combo, self.axis_combo, self.curve_name_edit,
-            self.palette_combo, self.color_combo, self.marker_combo,
-            self.marker_size_combo, self.linestyle_combo, self.linewidth_combo, self.subplot_index_combo
+            self.palette_combo, self.color_combo, self.subplot_index_combo
         ]
         for w in widgets_to_block:
             w.blockSignals(True)
@@ -682,10 +717,10 @@ class MainWindow(QMainWindow):
 
         # Axis + style
         self.axis_combo.setCurrentText(c.axis)
-        self.marker_combo.setCurrentText(c.marker)
-        self.marker_size_combo.setValue(c.marker_size)
-        self.linestyle_combo.setCurrentText(c.linestyle)
-        self.linewidth_combo.setCurrentText(str(c.linewidth))
+        # self.marker_combo.setCurrentText(c.marker)
+        # self.marker_size_combo.setValue(c.marker_size)
+        # self.linestyle_combo.setCurrentText(c.linestyle)
+        # self.linewidth_combo.setCurrentText(str(c.linewidth))
         self.palette_combo.setCurrentText(c.palette_name)
 
         # Rebuild swatches for this palette and ensure curve color exists/select it
@@ -736,15 +771,25 @@ class MainWindow(QMainWindow):
             self.axis_combo.currentText(),
             selected_color(self.color_combo),
             c.palette_name,
-            self.marker_combo.currentText(),
-            self.marker_size_combo.value(),
-            self.linestyle_combo.currentText(),
-            float(self.linewidth_combo.currentText()),
+            # self.marker_combo.currentText(),
+            # self.marker_size_combo.value(),
+            # linestyle=self.linestyle_combo.currentText(),
+            # linewidth=float(self.linewidth_combo.currentText()),
             subplot_index=int(self.subplot_index_combo.currentText() or "0"),
         )
 
         # Keep curve list in sync and keep selection
-        self.refresh_curve_list()
+        # Keep curve list text in sync WITHOUT losing selection
+        item = self.curve_list.item(idx)
+
+        if item is not None:
+            item.setText(self.controller.curves[idx].display_name())
+        else:
+            # fallback (shouldn't happen)
+            print("fallback")
+            self.refresh_curve_list()
+            self.curve_list.setCurrentRow(idx)
+
         self.curve_list.setCurrentRow(idx)
 
         self.controller.update_plot()
@@ -998,7 +1043,7 @@ class MainWindow(QMainWindow):
                 float(ymin_text) if ymin_text else None,
                 float(ymax_text) if ymax_text else None,
             )
-        
+
     def apply_subplot_ticks(self):
         cfg = self.controller.config
         xtN = self.x_ticks_edit.value()
@@ -1033,15 +1078,15 @@ class MainWindow(QMainWindow):
         else:
             ov = cfg.subplots_config.setdefault(i0, {})
             ov["yticksN"] = ytN
-    
+
     def _sync_labels_from_mpl(self, event=None):
-        """
-        Pull current X/Y labels from Matplotlib into PlotConfig.
-        Only labels. No limits/ticks/scales.
-        """
+        if self._skip_next_draw_event:
+            self._skip_next_draw_event = False
+            return
         if self._mpl_label_sync_guard:
             return
         self._mpl_label_sync_guard = True
+        
         try:
             cfg = self.controller.config
             axes = getattr(self.canvas, "axes", [])
@@ -1074,7 +1119,7 @@ class MainWindow(QMainWindow):
                 # per subplot
                 for i, ax in enumerate(axes):
                     cfg.subplots_config.setdefault(i, {})["xlabel"] = ax.get_xlabel()
-                    
+
 
                 cfg.xlabel = axes[0].get_xlabel() or cfg.xlabel
 
@@ -1103,8 +1148,70 @@ class MainWindow(QMainWindow):
 
                 cfg.ylabel = axes[0].get_ylabel() or cfg.ylabel
 
+            # -------------------------
+            # Markers
+            # ------------------------
+            # -------------------------
+        # Sync markers from MPL artists (toolbar Customize)
+        # -------------------------
+        
+            self.color_combo.blockSignals(True)
+            self.palette_combo.blockSignals(True)
+            for j, c in enumerate(self.controller.curves):
+                line = getattr(c, "_mpl_line", None)
+                if line is None:
+                    continue
+
+                selected_idx = self.curve_list.currentRow()
+                m = line.get_marker()
+                m_face_color = line.get_markerfacecolor()
+                m_edge_color = line.get_markeredgecolor()
+                ms = line.get_markersize()
+                linestyle = line.get_linestyle()
+                linewidth = line.get_linewidth()
+                color= line.get_color()
+                name = line.get_label()
+                # if color is rba, convert to hex
+                if isinstance(color, tuple) and len(color) == 4:
+                    r, g, b, a = color
+                    r = int(round(r * 255))
+                    g = int(round(g * 255))
+                    b = int(round(b * 255))
+                    color = f"#{r:02x}{g:02x}{b:02x}"
+
+
+                # Normalize Matplotlib conventions to your model
+                if m in (None, "", " ", "None"):
+                    m = "None"
+
+                c.marker = m
+                if ms is not None:
+                    c.marker_size = int(round(ms))
+                c.linestyle = linestyle
+                c.linewidth = float(linewidth)
+                c.color = color
+                c.marker_face_color = m_face_color
+                c.marker_edge_color = m_edge_color
+                c.name = name
+                if j == selected_idx:
+                    ensure_color_in_combo(self.color_combo, c.color)
+            
+            self.refresh_curve_list()
+            self.canvas.refresh_legends(cfg)
+
+            # Legend was rebuilt AFTER the draw_event → force one redraw so it becomes visible.
+            self._skip_next_draw_event = True
+            self.canvas.draw_idle()
+
+
+        
         finally:
+            
             self._mpl_label_sync_guard = False
+
+            self.color_combo.blockSignals(False)
+            self.palette_combo.blockSignals(False)
+            
         # XY limits
         for i, ax in enumerate(getattr(self.canvas, "axes", [])):
             xlim = ax.get_xlim()
@@ -1112,7 +1219,7 @@ class MainWindow(QMainWindow):
             cfg.subplots_config.setdefault(i, {})["xlim"] = (xlim[0], xlim[1])
             cfg.subplots_config.setdefault(i, {})["ylim"] = (ylim[0], ylim[1])
 
-    
+
     def save_project(self):
         path, _ = QFileDialog.getSaveFileName(
             self, "Save plot project", "", "Plot Project (*.pproj *.json)"
@@ -1137,6 +1244,10 @@ class MainWindow(QMainWindow):
         self.populate_all_columns()
         self.refresh_curve_list()
         self.refresh_subplot_list()
+        rows, cols = self.controller.config.subplot_layout
+        self.populate_subplot_indices(rows * cols - 1)
+
+
         # self.xlabel_edit.setText(self.controller.config.xlabel)
         # self.ylabel_edit.setText(self.controller.config.ylabel)
         if self.controller.curves:

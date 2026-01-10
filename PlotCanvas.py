@@ -50,7 +50,7 @@ class PlotCanvas(FigureCanvas):
         
 
     def draw_curves(self, curves, config):
-        
+        print("Drawing")
         # 1) Create/clear axes
         self.clear(config.subplot_layout, config)   # your clear() handles fig.subplots + clearing
 
@@ -66,22 +66,25 @@ class PlotCanvas(FigureCanvas):
                 ax = self.ax2.setdefault(i, ax.twinx())
 
             x, y = curve.xy()
-            ax.plot(
+            (line,) = ax.plot(
                 x, y,
                 label=curve.label,
                 color=curve.color,
                 marker=curve.marker,
                 markersize=curve.marker_size,
+                markerfacecolor=curve.marker_face_color,
+                markeredgecolor=curve.marker_edge_color,
                 linestyle=curve.linestyle,
                 linewidth=curve.linewidth,
+
             )
+            curve._mpl_line = line
 
         # 3) Apply config to *each* subplot (and its secondary axis if present)
         for i, ax in enumerate(self.axes):
             ov = config.subplots_config.get(i, {})
             rows, cols = config.subplot_layout
             r, c = divmod(i, cols)
-      
             # shared_x rule: xlabel/xlim/xticks must be global
             if config.shared_x:
                 if r == rows-1:  # bottom row
@@ -90,21 +93,21 @@ class PlotCanvas(FigureCanvas):
                     ax.set_xlabel("")
                     ax.tick_params(labelbottom=False)
 
-                xlim = ov.get("xlim", config.xlimits) or config.xlimits
+                # xlim = ov.get("xlim", config.xlimits) or config.xlimits
                 xtN  = ov.get("xticksN", config.xticksN) or config.xticksN
             else:
                 ax.set_xlabel(ov.get("xlabel", config.xlabel))
 
-                xlim = ov.get("xlim", config.xlimits) or config.xlimits
+                # xlim = ov.get("xlim", config.xlimits) or config.xlimits
                 xtN  = ov.get("xticksN", config.xticksN) or config.xticksN
                 
             # y is per subplot (unless you later decide shared_y similar)
             ax.set_ylabel(ov.get("ylabel", config.ylabel))
-            ylim = ov.get("ylim", config.ylimits) or config.ylimits
+            # ylim = ov.get("ylim", config.ylimits) or config.ylimits
             ytN  = ov.get("yticksN", config.yticksN) or config.yticksN
 
-            if xlim is not None: ax.set_xlim(xlim)
-            if ylim is not None: ax.set_ylim(ylim)
+            # if xlim is not None: ax.set_xlim(xlim)
+            # if ylim is not None: ax.set_ylim(ylim)
 
             if xtN is not None: ax.xaxis.set_major_locator(MaxNLocator(xtN))
             if ytN is not None: ax.yaxis.set_major_locator(MaxNLocator(ytN))
@@ -218,3 +221,27 @@ class PlotCanvas(FigureCanvas):
         # flatten → axs[0], axs[1], ...
         self.axes = list(axs.flat) if hasattr(axs, "flat") else [axs]
         self.ax2.clear()
+
+    def refresh_legends(self, config):
+        """Rebuild legends from the *current* artists without replotting curves."""
+        for i, ax in enumerate(self.axes):
+            # Remove existing legend if any
+            old = ax.get_legend()
+            if old is not None:
+                old.remove()
+
+            if not config.legend:
+                continue
+
+            h, l = ax.get_legend_handles_labels()
+
+            ax2 = self.ax2.get(i)
+            if ax2 is not None:
+                h2, l2 = ax2.get_legend_handles_labels()
+                h += h2
+                l += l2
+
+            if h:
+                leg = ax.legend(h, l)
+                leg.set_draggable(True)
+

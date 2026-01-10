@@ -28,7 +28,7 @@ class AppController:
             self.update_plot()
 
 
-    def add_curve(self, file_name, data_file, x_col, y_col, axis, color, palette_name="Plotly", marker=None, marker_size=None, linestyle="-", linewidth=1.0, x_data_file=None, y_data_file=None):
+    def add_curve(self, file_name, data_file, x_col, y_col, axis, color, palette_name="Plotly", marker=None, marker_size=None, linestyle="-", linewidth=2.0, x_data_file=None, y_data_file=None):
         name = f"Curve {self.curve_counter}"
         self.curve_counter += 1
         curve = Curve(file_name, data_file, x_col, y_col, axis, name=name, color=color, palette_name=palette_name, marker=marker, marker_size=marker_size, linestyle=linestyle, linewidth=linewidth, x_data_file=x_data_file, y_data_file=y_data_file, subplot_index=0)
@@ -42,17 +42,17 @@ class AppController:
             # self.curve_counter -= 1
             self.update_plot()
 
-    def update_curve(self, idx, x_col, y_col, axis, color, palette_name="Plotly", Marker = None,marker_size=None, linestyle="-", linewidth=1.0, subplot_index=0):
+    def update_curve(self, idx, x_col, y_col, axis, color, palette_name="Plotly",  subplot_index=0):
         c = self.curves[idx]
         c.x_col = x_col
         c.y_col = y_col
         c.axis = axis
         c.color = color   
-        c.marker = Marker
-        c.marker_size = marker_size
-        c.palette_name = palette_name
-        c.linestyle = linestyle
-        c.linewidth = linewidth
+        # c.marker = Marker
+        # c.marker_size = marker_size
+        # c.palette_name = palette_name
+        # c.linestyle = linestyle
+        # c.linewidth = linewidth
         c.subplot_index = subplot_index
         # self.update_plot()
 
@@ -97,6 +97,8 @@ class AppController:
                 "palette_name": getattr(c, "palette_name", "Plotly"),
                 "marker": c.marker,
                 "marker_size": c.marker_size,
+                "marker_face_color": c.marker_face_color,
+                "marker_edge_color": c.marker_edge_color,
                 "linestyle": c.linestyle,
                 "linewidth": c.linewidth,
                 "subplot_index": c.subplot_index,
@@ -161,9 +163,8 @@ class AppController:
             except Exception:
                 pass
         self.config.subplots_config = fixed
-
         # NOW redraw (after keys are correct)
-        self.update_plot()
+        
 
         # Restore curves (only if their referenced files exist)
         for c in obj.get("curves", []):
@@ -175,6 +176,13 @@ class AppController:
             curve = self._make_curve_from_dict(c)
             self.curves.append(curve)
         self.update_plot()
+
+        # Finally, apply xlim/ylim per subplot if any
+        for ax in self.canvas.axes:
+            ov = self.config.subplots_config.get(self.canvas.axes.index(ax), {})
+            rows, cols = self.config.subplot_layout
+            ax.set_xlim(ov.get("xlim", self.config.xlimits) or self.config.xlimits)
+            ax.set_ylim(ov.get("ylim", self.config.ylimits) or self.config.ylimits)
         return missing
 
     def _find_file_key(self, data_file):
@@ -198,6 +206,8 @@ class AppController:
             palette_name=d.get("palette_name", "Plotly"),
             marker=d.get("marker", "None"),
             marker_size=d.get("marker_size", 5),
+            marker_face_color=d.get("marker_face_color", None),
+            marker_edge_color=d.get("marker_edge_color", None),
             linestyle=d.get("linestyle", "-"),
             linewidth=d.get("linewidth", 2.0),
             x_data_file=x_df,

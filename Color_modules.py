@@ -32,6 +32,8 @@ def populate_color_combo(combo: QComboBox, colors):
         icon = make_color_swatch_icon(c)
         combo.addItem(icon, " ")          # blank label (space avoids weird height issues)
         combo.setItemData(combo.count()-1, c, Qt.UserRole)  # store the hex code as data
+    # If current color not in the palette, add it
+    
 
 def selected_color(combo: QComboBox) -> str:
     return combo.currentData(Qt.UserRole)  # returns "#RRGGBB"
