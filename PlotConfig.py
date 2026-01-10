@@ -7,7 +7,7 @@ class PlotConfig:
         self.minor_ticks = False      
 
         self.legend = True
-        self.palette_name = "Plotly"
+        self.palette_name = "Matplotlib default"
         self.ratio = (1,1)
         self.dirty = False
         self.xlimits = None  # (min, max) or None
