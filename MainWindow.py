@@ -16,8 +16,9 @@ Notes:
 """
 
 import os
+from ast import literal_eval
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QPushButton, QLabel, QListWidget, QLineEdit, QComboBox,
+    QMainWindow, QWidget, QPushButton, QLabel, QListWidget, QListWidgetItem, QLineEdit, QComboBox,
     QFileDialog, QMessageBox, QHBoxLayout, QVBoxLayout, QGridLayout, QSlider, QCheckBox, QScrollArea, QApplication, QDialog, QAbstractButton,
 )
 from PyQt5.QtCore import Qt, QTimer
@@ -145,7 +146,6 @@ class MainWindow(QMainWindow):
         self._skip_next_draw_event = False
         # Call sync only when a toolbar action is used
         for act in self.toolbar.actions():
-            print(act.text())
             act.triggered.connect(lambda checked=False, a=act: self._on_toolbar_action(a))
 
     def _on_toolbar_action(self, action):
@@ -542,11 +542,9 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            file_name = os.path.basename(path)
             data_file = load_data_file(path)
-
-            # Store by displayed filename (your UI expects this convention)
-            self.controller.data_files[file_name] = data_file
+            file_key = os.path.abspath(path)
+            self.controller.data_files[file_key] = data_file
 
             self.refresh_files_list()
             self.populate_all_columns()
@@ -557,8 +555,10 @@ class MainWindow(QMainWindow):
         """Rebuild the file list widget from controller state."""
         self.files_list.blockSignals(True)
         self.files_list.clear()
-        for file_name in self.controller.data_files:
-            self.files_list.addItem(file_name)
+        for file_key in self.controller.data_files:
+            item = QListWidgetItem(self._display_name_for_key(file_key))
+            item.setData(Qt.UserRole, file_key)
+            self.files_list.addItem(item)
         self.files_list.blockSignals(False)
 
     def remove_selected_file(self):
@@ -567,11 +567,12 @@ class MainWindow(QMainWindow):
         if idx < 0:
             return
 
-        file_name = self.files_list.item(idx).text()
-        self.controller.remove_file(file_name)
+        file_key = self.files_list.item(idx).data(Qt.UserRole)
+        self.controller.remove_file(file_key)
 
         self.refresh_files_list()
         self.populate_all_columns()
+        self.refresh_curve_list()
         self.controller.update_plot()
 
     # ------------------------------------------------------------------
@@ -589,12 +590,14 @@ class MainWindow(QMainWindow):
         self.x_combo.clear()
         self.y_combo.clear()
 
-        for file_name in sorted(self.controller.data_files.keys()):
-            data_file = self.controller.data_files[file_name]
+        for file_key in sorted(self.controller.data_files.keys()):
+            data_file = self.controller.data_files[file_key]
+            display_name = self._display_name_for_key(file_key)
             for col_name in data_file.headers:
-                display_text = f"{file_name}: {col_name}"
-                self.x_combo.addItem(display_text)
-                self.y_combo.addItem(display_text)
+                display_text = f"{display_name}: {col_name}"
+                user_data = (file_key, col_name)
+                self.x_combo.addItem(display_text, user_data)
+                self.y_combo.addItem(display_text, user_data)
 
         self.x_combo.blockSignals(False)
         self.y_combo.blockSignals(False)
@@ -615,15 +618,15 @@ class MainWindow(QMainWindow):
         if not self.controller.data_files:
             return
 
-        x_text = self.x_combo.currentText()
-        y_text = self.y_combo.currentText()
+        x_data = self.x_combo.currentData(Qt.UserRole)
+        y_data = self.y_combo.currentData(Qt.UserRole)
 
-        if ": " not in x_text or ": " not in y_text:
+        if not x_data or not y_data:
             QMessageBox.warning(self, "Error", "Please select valid columns")
             return
 
-        x_file_name, x_col = x_text.split(": ", 1)
-        y_file_name, y_col = y_text.split(": ", 1)
+        x_file_name, x_col = x_data
+        y_file_name, y_col = y_data
 
         x_data_file = self.controller.data_files[x_file_name]
         y_data_file = self.controller.data_files[y_file_name]
@@ -691,29 +694,14 @@ class MainWindow(QMainWindow):
         self.curve_name_edit.setText(c.name)
         self.subplot_index_combo.setCurrentText(str(c.subplot_index))
 
-        # Find file names matching x/y data files
-        x_file_name = None
-        y_file_name = None
-        for fname, dfile in self.controller.data_files.items():
-            if dfile is c.x_data_file:
-                x_file_name = fname
-            if dfile is c.y_data_file:
-                y_file_name = fname
+        x_file_name = self._find_key_for_data_file(c.x_data_file)
+        y_file_name = self._find_key_for_data_file(c.y_data_file)
 
-        # Select correct x/y entries in combos
         if x_file_name:
-            wanted = f"{x_file_name}: {c.x_col}"
-            for i in range(self.x_combo.count()):
-                if self.x_combo.itemText(i) == wanted:
-                    self.x_combo.setCurrentIndex(i)
-                    break
+            self._set_combo_to_column(self.x_combo, x_file_name, c.x_col)
 
         if y_file_name:
-            wanted = f"{y_file_name}: {c.y_col}"
-            for i in range(self.y_combo.count()):
-                if self.y_combo.itemText(i) == wanted:
-                    self.y_combo.setCurrentIndex(i)
-                    break
+            self._set_combo_to_column(self.y_combo, y_file_name, c.y_col)
 
         # Axis + style
         self.axis_combo.setCurrentText(c.axis)
@@ -747,21 +735,21 @@ class MainWindow(QMainWindow):
         c = self.controller.curves[idx]
         c.name = self.curve_name_edit.text().strip() or c.name
 
-        # Parse "filename: column" from X/Y combos
-        x_text = self.x_combo.currentText()
-        y_text = self.y_combo.currentText()
+        x_data = self.x_combo.currentData(Qt.UserRole)
+        y_data = self.y_combo.currentData(Qt.UserRole)
 
-        if ": " in x_text:
-            x_file_name, x_col = x_text.split(": ", 1)
+        if x_data:
+            x_file_name, x_col = x_data
             c.x_data_file = self.controller.data_files[x_file_name]
+            c.file_name = x_file_name
         else:
-            x_col = x_text
+            x_col = c.x_col
 
-        if ": " in y_text:
-            y_file_name, y_col = y_text.split(": ", 1)
+        if y_data:
+            y_file_name, y_col = y_data
             c.y_data_file = self.controller.data_files[y_file_name]
         else:
-            y_col = y_text
+            y_col = c.y_col
 
         # Update curve in controller/model
         self.controller.update_curve(
@@ -821,7 +809,7 @@ class MainWindow(QMainWindow):
             # Ratio (tuple like (4,3))
             # self.apply_subplot_limits()
             self.apply_subplot_ticks()
-            self.controller.config.ratio = eval(dim_text)
+            self.controller.config.ratio = literal_eval(dim_text)
 
             # Limits: empty => None
             # self.controller.config.xlimits = (
@@ -843,6 +831,7 @@ class MainWindow(QMainWindow):
         if dlg.exec_() == QDialog.Accepted:
 
             dlg.apply_to_config()
+            self.controller.normalize_curve_subplots()
             self.controller.update_plot()
             max_index = dlg.get_max_subplot_index()
             self.populate_subplot_indices(max_index)
@@ -1259,3 +1248,31 @@ class MainWindow(QMainWindow):
                 f"- {k}: {p}" for k, p in missing
             )
             QMessageBox.warning(self, "Missing data files", msg)
+
+    def _display_name_for_key(self, file_key: str) -> str:
+        base = os.path.basename(file_key)
+        siblings = [k for k in self.controller.data_files if os.path.basename(k) == base]
+        if len(siblings) <= 1:
+            return base
+
+        parent = os.path.basename(os.path.dirname(file_key))
+        parent_matches = [
+            k for k in siblings
+            if os.path.basename(os.path.dirname(k)) == parent
+        ]
+        if len(parent_matches) == 1:
+            return f"{base} ({parent})"
+        return file_key
+
+    def _find_key_for_data_file(self, target):
+        for file_key, data_file in self.controller.data_files.items():
+            if data_file is target:
+                return file_key
+        return None
+
+    def _set_combo_to_column(self, combo, file_key, column_name):
+        wanted = (file_key, column_name)
+        for i in range(combo.count()):
+            if combo.itemData(i, Qt.UserRole) == wanted:
+                combo.setCurrentIndex(i)
+                return

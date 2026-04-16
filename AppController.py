@@ -22,9 +22,12 @@ class AppController:
         
     def remove_file(self, file_name):
         if file_name in self.data_files:
-            del self.data_files[file_name]
-            # Also remove any curves associated with this file
-            self.curves = [c for c in self.curves if c.file_name != file_name]
+            removed_data_file = self.data_files.pop(file_name)
+            # Remove curves that depend on the deleted data source on either axis.
+            self.curves = [
+                c for c in self.curves
+                if c.x_data_file is not removed_data_file and c.y_data_file is not removed_data_file
+            ]
             self.update_plot()
 
 
@@ -58,6 +61,12 @@ class AppController:
 
     def update_plot(self):
         self.canvas.draw_curves(self.curves, self.config)
+
+    def normalize_curve_subplots(self):
+        rows, cols = getattr(self.config, "subplot_layout", (1, 1))
+        max_index = max(0, rows * cols - 1)
+        for curve in self.curves:
+            curve.subplot_index = max(0, min(int(curve.subplot_index), max_index))
     
     def to_dict(self) -> dict:
         """Export the full editable plot state."""
@@ -175,6 +184,7 @@ class AppController:
 
             curve = self._make_curve_from_dict(c)
             self.curves.append(curve)
+        self.normalize_curve_subplots()
         self.update_plot()
 
         # Finally, apply xlim/ylim per subplot if any

@@ -61,10 +61,15 @@ def parse_float(s: str):
 def detect_delimiter(line):
     if ";" in line:
         return ";"
-    if "," in line:
-        return ","
     if "\t" in line:
         return "\t"
+
+    whitespace_parts = re.split(r"\s+", line.strip())
+    if len(whitespace_parts) > 1 and all(parse_float(part) is not None for part in whitespace_parts):
+        return None
+
+    if "," in line:
+        return ","
     return None  # whitespace
 
 

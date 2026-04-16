@@ -56,9 +56,12 @@ class PlotCanvas(FigureCanvas):
 
 
         # 2) Plot curves in their subplot
+        max_index = max(0, len(self.axes) - 1)
         for curve in curves:
             i = int(curve.subplot_index)
-            i = max(0, min(i, len(self.axes) - 1))  # clamp
+            i = max(0, min(i, max_index))
+            if curve.subplot_index != i:
+                curve.subplot_index = i
 
             ax = self.axes[i]
 
@@ -93,21 +96,23 @@ class PlotCanvas(FigureCanvas):
                     ax.set_xlabel("")
                     ax.tick_params(labelbottom=False)
 
-                # xlim = ov.get("xlim", config.xlimits) or config.xlimits
+                xlim = ov.get("xlim", config.xlimits) or config.xlimits
                 xtN  = ov.get("xticksN", config.xticksN) or config.xticksN
             else:
                 ax.set_xlabel(ov.get("xlabel", config.xlabel))
 
-                # xlim = ov.get("xlim", config.xlimits) or config.xlimits
+                xlim = ov.get("xlim", config.xlimits) or config.xlimits
                 xtN  = ov.get("xticksN", config.xticksN) or config.xticksN
                 
             # y is per subplot (unless you later decide shared_y similar)
             ax.set_ylabel(ov.get("ylabel", config.ylabel))
-            # ylim = ov.get("ylim", config.ylimits) or config.ylimits
+            ylim = ov.get("ylim", config.ylimits) or config.ylimits
             ytN  = ov.get("yticksN", config.yticksN) or config.yticksN
 
-            # if xlim is not None: ax.set_xlim(xlim)
-            # if ylim is not None: ax.set_ylim(ylim)
+            if xlim is not None:
+                ax.set_xlim(xlim)
+            if ylim is not None:
+                ax.set_ylim(ylim)
 
             if xtN is not None: ax.xaxis.set_major_locator(MaxNLocator(xtN))
             if ytN is not None: ax.yaxis.set_major_locator(MaxNLocator(ytN))
@@ -156,10 +161,8 @@ class PlotCanvas(FigureCanvas):
             ax.grid(config.grid, which="major")
 
             if config.minor_grid:
-                ax.minorticks_on()
                 ax.grid(True, which="minor", linestyle=":", linewidth=0.5)
             else:
-                ax.minorticks_off()
                 ax.grid(False, which="minor")
 
             # Secondary grids usually look messy; keep them off by default
