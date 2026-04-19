@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+build/
+dist/
+output/
+
+tmp/pyi_build/
+tmp/*.html
+tmp/*.toc
+tmp/*.pyz
+tmp/*.pkg
+assets/plot_previews/_*.png
+
+.DS_Store

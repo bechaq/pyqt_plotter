@@ -15,13 +15,17 @@ Notes:
 - I kept your existing controller API calls unchanged.
 """
 
+import json
 import os
 from ast import literal_eval
+from functools import partial
+from pathlib import Path
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QListWidget, QListWidgetItem, QLineEdit, QComboBox,
-    QFileDialog, QMessageBox, QHBoxLayout, QVBoxLayout, QGridLayout, QSlider, QCheckBox, QScrollArea, QApplication, QDialog, QAbstractButton,
+    QFileDialog, QMessageBox, QHBoxLayout, QVBoxLayout, QGridLayout, QSlider, QCheckBox, QScrollArea, QApplication, QDialog, QAbstractButton, QShortcut, QStackedWidget,
 )
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QKeySequence
 
 from PlotCanvas import PlotCanvas
 from AppController import AppController
@@ -32,39 +36,56 @@ from Color_modules import (
     ensure_color_in_combo,
 )
 from DataFile import load_data_file
-from AdvancedDialog import *
+from AdvancedDialog import AdvancedDialog
+from PlotterControlPanel import PlotterControlPanel
+from StartupLandingPage import StartupLandingPage
+from plot_modes import (
+    friendly_3d_style,
+    friendly_plot_mode,
+    PLOT_MODE_OPTIONS,
+    plot_mode_requires_z,
+    plot_mode_supports_render_style,
+    plot_mode_supports_direct_color,
+    plot_mode_supports_secondary_axis,
+    plot_mode_supports_z_ticks,
+    render_style_uses_colormap,
+)
+from state_store import StateStore
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, initial_plot_mode=None, prompt_for_mode=True):
         super().__init__()
-
-        # -------------------------
-        # Window + core objects
-        # -------------------------
         self.setWindowTitle("Clean PyQt Plotter")
-        self.resize(1000, 600)
+        self.resize(1440, 900)
 
         self.canvas = PlotCanvas()
         self.controller = AppController(self.canvas)
+        self.state_store = StateStore()
+        self._undo_stack = []
+        self._redo_stack = []
+        self._restoring_state = False
+        self._dirty = False
+        self._current_project_path = None
+        self._history_limit = 50
 
-
-
-        # -------------------------
-        # Debounced redraw on resize
-        # -------------------------
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self.controller.update_plot)
 
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.timeout.connect(self._write_autosave)
 
-        # Deactivate subplot list initially
-        self._active_subplot = None  # None = global, sinon int subplot index
-
-
-        # Build UI + connect signals
+        self._active_subplot = None
+        self._startup_cancelled = False
         self._build_ui()
         self._connect_signals()
+        self._bind_shortcuts()
+        self._refresh_recent_projects()
+        self._update_history_actions()
+        self._maybe_restore_autosave()
+        self._initialize_plot_mode(initial_plot_mode, prompt_for_mode)
 
     # ------------------------------------------------------------------
     # Qt events
@@ -82,31 +103,61 @@ class MainWindow(QMainWindow):
         # Restart timer on each resize event
         self._resize_timer.start(150)
 
+    def closeEvent(self, event):
+        if self._is_headless():
+            event.accept()
+            return
+        self._write_autosave()
+        if not self._dirty:
+            event.accept()
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Unsaved changes",
+            "Save changes before closing?",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save,
+        )
+        if reply == QMessageBox.Cancel:
+            event.ignore()
+            return
+        if reply == QMessageBox.Save:
+            if not self.save_project():
+                event.ignore()
+                return
+        event.accept()
+
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
     def _build_ui(self):
-        """Top-level layout: left control panel + right plot canvas."""
         central = QWidget()
         self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        self.main_layout = QHBoxLayout(central)
+        self.view_stack = QStackedWidget()
+        layout.addWidget(self.view_stack)
 
-        # ---------------------------
-# Scrollable control panel
-# ---------------------------
+        self.landing_page = StartupLandingPage(self._startup_mode_cards())
+        self.landing_page.modeActivated.connect(self._activate_plot_mode)
+        self.view_stack.addWidget(self.landing_page)
+
+        self.workspace_page = self._build_workspace_page()
+        self.view_stack.addWidget(self.workspace_page)
+
+        self._show_landing_page()
+
+    def _build_workspace_page(self):
+        workspace = QWidget()
+        self.main_layout = QHBoxLayout(workspace)
+
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        # Container widget inside scroll area
-        control_container = QWidget()
-        self.control_layout = QVBoxLayout(control_container)
-
-        scroll_area.setWidget(control_container)
-
-        # Add to main layout
-        # Left: controls
+        self.controls = PlotterControlPanel(self.controller)
+        scroll_area.setWidget(self.controls)
         self.main_layout.addWidget(scroll_area, 1)
 
         # Right: toolbar + canvas stacked vertically
@@ -123,20 +174,7 @@ class MainWindow(QMainWindow):
 
 
         # Build control sections (top → bottom)
-        self._build_files_section()
-        # self._build_axis_labels_section()
-        self._build_dimension_section()
-        self._build_subplots_section()
-        self._build_curves_section()
-        self._build_color_section()
-        # self._build_marker_section()
-        # self._build_line_section()
-        # self._build_axis_limits_section()
-        self._build_ticks_section()
-        # self._build_grid_section()
-        self._build_actions_section()
-
-        self.control_layout.addStretch()
+        self._bind_control_attrs()
 
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self._right_layout.addWidget(self.toolbar, 0)
@@ -147,6 +185,96 @@ class MainWindow(QMainWindow):
         # Call sync only when a toolbar action is used
         for act in self.toolbar.actions():
             act.triggered.connect(lambda checked=False, a=act: self._on_toolbar_action(a))
+        return workspace
+
+    def _startup_mode_cards(self):
+        preview_root = Path(__file__).resolve().parent / "assets" / "plot_previews"
+        cards = {
+            "line2d": {
+                "button_label": "2D line plot",
+                "title": "2D line plots for curves and comparisons",
+                "description": (
+                    "Use this when you want classic X/Y plotting with one or more curves, "
+                    "subplot layouts, and optional secondary Y axes."
+                ),
+                "image": preview_root / "line2d_preview.png",
+            },
+            "heatmap2d": {
+                "button_label": "2D heatmap",
+                "title": "2D heatmaps for value fields",
+                "description": (
+                    "Best for X/Y/Z point data where Z is shown by color. "
+                    "This mode gives you a color-mapped view with a matching colorbar."
+                ),
+                "image": preview_root / "heatmap2d_preview.png",
+            },
+            "plot3d": {
+                "button_label": "3D plot",
+                "title": "3D lines, surfaces, and density volumes",
+                "description": (
+                    "Choose this to work with X/Y/Z data in three dimensions. "
+                    "You can build line plots, surfaces, and density-style volume views."
+                ),
+                "image": preview_root / "plot3d_preview.png",
+            },
+        }
+        return cards
+
+    def _show_landing_page(self):
+        self.view_stack.setCurrentWidget(self.landing_page)
+
+    def _show_workspace(self):
+        self.view_stack.setCurrentWidget(self.workspace_page)
+
+    def _bind_control_attrs(self):
+        attr_names = [
+            "control_layout",
+            "add_file_btn",
+            "remove_file_btn",
+            "files_list",
+            "file_preview",
+            "plot_mode_value",
+            "dimension_combo",
+            "subplot_label",
+            "subplot_list",
+            "x_ticks_edit",
+            "y_ticks_edit",
+            "z_ticks_label",
+            "z_ticks_edit",
+            "add_curve_btn",
+            "curve_list",
+            "remove_curve_btn",
+            "curve_name_edit",
+            "x_combo",
+            "y_combo",
+            "z_combo",
+            "x_column_label",
+            "y_column_label",
+            "z_column_label",
+            "axis_combo",
+            "axis_label",
+            "subplot_index_combo",
+            "subplot_index_label",
+            "render_style_label",
+            "render_style_combo",
+            "palette_combo",
+            "palette_label",
+            "color_combo",
+            "color_label",
+            "undo_btn",
+            "redo_btn",
+            "export_png_btn",
+            "export_svg_btn",
+            "export_pdf_btn",
+            "advanced_btn",
+            "plot_btn",
+            "save_project_btn",
+            "open_project_btn",
+            "recent_projects_combo",
+            "open_recent_btn",
+        ]
+        for name in attr_names:
+            setattr(self, name, getattr(self.controls, name))
 
     def _on_toolbar_action(self, action):
         txt = (action.text() or "").strip()
@@ -439,58 +567,319 @@ class MainWindow(QMainWindow):
     # Signal wiring (all in one place)
     # ------------------------------------------------------------------
     def _connect_signals(self):
-        # --- File actions ---
         self.add_file_btn.clicked.connect(self.load_file)
         self.remove_file_btn.clicked.connect(self.remove_selected_file)
+        self.files_list.currentRowChanged.connect(self.on_file_selected)
 
-        # --- Subplot actions ---
         self.subplot_list.currentRowChanged.connect(self.on_subplot_selected)
 
-        # --- Curve actions ---
         self.add_curve_btn.clicked.connect(self.add_curve)
         self.remove_curve_btn.clicked.connect(self.remove_selected_curve)
         self.curve_list.currentRowChanged.connect(self.on_curve_selected)
-
-        # --- Axis label edits ---
-        # editingFinished emits no args; we read the QLineEdit text in handler
-        # self.xlabel_edit.editingFinished.connect(self.on_xlabel_changed)
-        # self.ylabel_edit.editingFinished.connect(self.on_ylabel_changed)
-
-        # --- Subplot index ---
         self.subplot_index_combo.currentTextChanged.connect(self.on_curve_settings_changed)
-
-        # --- Palette ---
         self.palette_combo.currentTextChanged.connect(self.on_palette_changed)
-
-        # --- Curve live settings ---
         self.x_combo.currentTextChanged.connect(self.on_curve_settings_changed)
         self.y_combo.currentTextChanged.connect(self.on_curve_settings_changed)
+        self.z_combo.currentTextChanged.connect(self.on_curve_settings_changed)
+        self.render_style_combo.currentTextChanged.connect(self.on_curve_settings_changed)
+        self.render_style_combo.currentTextChanged.connect(lambda *_: self._apply_plot_mode_ui())
         self.axis_combo.currentTextChanged.connect(self.on_curve_settings_changed)
         self.curve_name_edit.editingFinished.connect(self.on_curve_settings_changed)
-
         self.color_combo.currentTextChanged.connect(self.on_curve_settings_changed)
-        # self.marker_combo.currentTextChanged.connect(self.on_curve_settings_changed)
-        # self.marker_size_combo.valueChanged.connect(self.on_curve_settings_changed)
-        # self.linestyle_combo.currentTextChanged.connect(self.on_curve_settings_changed)
-        # self.linewidth_combo.currentTextChanged.connect(self.on_curve_settings_changed)
-
-        # --- Canvas settings ---
         self.dimension_combo.currentTextChanged.connect(self.on_canvas_settings_changed)
-        # self.x_min_edit.editingFinished.connect(self.on_canvas_settings_changed)
-        # self.x_max_edit.editingFinished.connect(self.on_canvas_settings_changed)
-        # self.y_min_edit.editingFinished.connect(self.on_canvas_settings_changed)
-        # self.y_max_edit.editingFinished.connect(self.on_canvas_settings_changed)
         self.x_ticks_edit.valueChanged.connect(self.on_canvas_settings_changed)
         self.y_ticks_edit.valueChanged.connect(self.on_canvas_settings_changed)
-        # self.minor_ticks_checkbox.stateChanged.connect(self.on_canvas_settings_changed)
-        # self.major_grid_checkbox.stateChanged.connect(self.on_canvas_settings_changed)
-        # self.minor_grid_checkbox.stateChanged.connect(self.on_canvas_settings_changed)
-
-        # --- Advanced dialog ---
+        self.z_ticks_edit.valueChanged.connect(self.on_canvas_settings_changed)
         self.advanced_btn.clicked.connect(self.open_advanced_dialog)
-
-        # --- Manual plot update ---
         self.plot_btn.clicked.connect(self.controller.update_plot)
+        self.save_project_btn.clicked.connect(self.save_project)
+        self.open_project_btn.clicked.connect(self.open_project)
+        self.undo_btn.clicked.connect(self.undo)
+        self.redo_btn.clicked.connect(self.redo)
+        self.export_png_btn.clicked.connect(partial(self.export_plot, "png"))
+        self.export_svg_btn.clicked.connect(partial(self.export_plot, "svg"))
+        self.export_pdf_btn.clicked.connect(partial(self.export_plot, "pdf"))
+        self.open_recent_btn.clicked.connect(self.open_recent_project)
+
+    def _bind_shortcuts(self):
+        standard_shortcuts = [
+            QKeySequence.Undo,
+            QKeySequence.Redo,
+        ]
+        for key in standard_shortcuts:
+            action = self.undo if key == QKeySequence.Undo else self.redo
+            QShortcut(QKeySequence(key), self, activated=action)
+
+        # Keep common Windows/Linux redo bindings available alongside the
+        # platform-native sequences that Qt maps on macOS.
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self.redo)
+        QShortcut(QKeySequence("Ctrl+Y"), self, activated=self.redo)
+
+    def _snapshot_state(self):
+        return json.loads(json.dumps(self.controller.to_dict()))
+
+    def _finalize_state_change(self, before_state, *, mark_dirty=True):
+        if self._restoring_state:
+            return
+        after_state = self._snapshot_state()
+        if after_state == before_state:
+            return
+        self._undo_stack.append(before_state)
+        if len(self._undo_stack) > self._history_limit:
+            self._undo_stack = self._undo_stack[-self._history_limit:]
+        self._redo_stack.clear()
+        if mark_dirty:
+            self._set_dirty(True)
+        self._update_history_actions()
+
+    def _perform_state_change(self, mutator, *, mark_dirty=True):
+        before_state = self._snapshot_state()
+        result = mutator()
+        self._finalize_state_change(before_state, mark_dirty=mark_dirty)
+        return result
+
+    def _set_dirty(self, value: bool):
+        self._dirty = value
+        title = "Clean PyQt Plotter"
+        if self._current_project_path:
+            title += f" - {Path(self._current_project_path).name}"
+        if self._dirty:
+            title += " *"
+            self._autosave_timer.start(800)
+        else:
+            self._autosave_timer.stop()
+            self.state_store.clear_autosave()
+        self.setWindowTitle(title)
+
+    def _write_autosave(self):
+        if not self._dirty or self._restoring_state:
+            return
+        payload = {
+            "current_project_path": self._current_project_path,
+            "project_state": self._snapshot_state(),
+        }
+        self.state_store.save_autosave(payload)
+
+    def _maybe_restore_autosave(self):
+        payload = self.state_store.load_autosave()
+        if not payload:
+            return
+        if self._is_headless():
+            return
+        reply = QMessageBox.question(
+            self,
+            "Restore autosave",
+            "An autosaved session was found. Do you want to restore it?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            self.state_store.clear_autosave()
+            return
+        missing = self._restore_state(payload.get("project_state", {}), mark_dirty=True)
+        self._current_project_path = payload.get("current_project_path")
+        self._set_dirty(True)
+        if missing:
+            msg = "Some autosaved data files were missing and related curves were skipped:\n\n" + "\n".join(
+                f"- {k}: {p}" for k, p in missing
+            )
+            QMessageBox.warning(self, "Missing data files", msg)
+
+    def _initialize_plot_mode(self, initial_plot_mode, prompt_for_mode):
+        if self.controller.curves or self.controller.data_files:
+            self._apply_plot_mode_ui()
+            self._show_workspace()
+            return
+
+        if initial_plot_mode:
+            self._activate_plot_mode(initial_plot_mode)
+            return
+
+        if self._is_headless() or not prompt_for_mode:
+            self._activate_plot_mode(getattr(self.controller.config, "plot_mode", "line2d"))
+            return
+
+        default_mode = getattr(self.controller.config, "plot_mode", "line2d")
+        self.landing_page.select_mode(default_mode)
+        self._show_landing_page()
+
+    def _activate_plot_mode(self, mode):
+        self.controller.config.plot_mode = mode
+        self._apply_plot_mode_ui()
+        self.controller.update_plot()
+        self._show_workspace()
+
+    def _apply_plot_mode_ui(self):
+        plot_mode = getattr(self.controller.config, "plot_mode", "line2d")
+        needs_z = plot_mode_requires_z(plot_mode)
+        supports_secondary_axis = plot_mode_supports_secondary_axis(plot_mode)
+        current_3d_style = self._current_3d_style()
+        uses_colormap = render_style_uses_colormap(plot_mode, current_3d_style)
+        supports_direct_color = plot_mode_supports_direct_color(plot_mode) and not uses_colormap
+        supports_render_style = plot_mode_supports_render_style(plot_mode)
+        supports_z_ticks = plot_mode_supports_z_ticks(plot_mode)
+
+        self.plot_mode_value.setText(friendly_plot_mode(plot_mode))
+        self.z_column_label.setText("Z column" if plot_mode == "plot3d" else "Z / value column")
+        self.z_column_label.setVisible(needs_z)
+        self.z_combo.setVisible(needs_z)
+        self.z_ticks_label.setVisible(supports_z_ticks)
+        self.z_ticks_edit.setVisible(supports_z_ticks)
+        self.axis_label.setVisible(supports_secondary_axis)
+        self.axis_combo.setVisible(supports_secondary_axis)
+        self.render_style_label.setVisible(supports_render_style)
+        self.render_style_combo.setVisible(supports_render_style)
+        self.palette_label.setText("Colormap" if uses_colormap else "Palette")
+        self.color_label.setText("Line color" if plot_mode == "plot3d" else "Curve color")
+        self.color_label.setVisible(supports_direct_color)
+        self.color_combo.setVisible(supports_direct_color)
+        self.add_curve_btn.setText(
+            "Add heatmap" if plot_mode == "heatmap2d"
+            else f"Add {friendly_3d_style(current_3d_style).lower()}" if plot_mode == "plot3d"
+            else "Add curve"
+        )
+
+    def _current_3d_style(self):
+        idx = self.curve_list.currentRow()
+        if idx >= 0 and idx < len(self.controller.curves):
+            return getattr(self.controller.curves[idx], "render_style", "line")
+        return self.render_style_combo.currentData() or "line"
+
+    def _curve_display_name(self, curve):
+        return curve.display_name(getattr(self.controller.config, "plot_mode", "line2d"))
+
+    def _restore_state(self, state_obj, *, mark_dirty=False):
+        self._restoring_state = True
+        try:
+            missing = self.controller.load_state_obj(state_obj)
+            self._refresh_all_ui()
+            self._show_workspace()
+        finally:
+            self._restoring_state = False
+        self._set_dirty(mark_dirty)
+        return missing
+
+    def _refresh_all_ui(self):
+        self._apply_plot_mode_ui()
+        self.refresh_files_list()
+        self.populate_all_columns()
+        self.refresh_curve_list()
+        self.refresh_subplot_list()
+        rows, cols = self.controller.config.subplot_layout
+        self.populate_subplot_indices(rows * cols - 1)
+        self.dimension_combo.blockSignals(True)
+        self.dimension_combo.setCurrentText(str(tuple(self.controller.config.ratio)).replace(" ", ""))
+        self.dimension_combo.blockSignals(False)
+        if self.controller.curves:
+            self.curve_list.setCurrentRow(0)
+            self.on_curve_selected(0)
+        else:
+            self.curve_name_edit.clear()
+        self.on_file_selected(self.files_list.currentRow())
+        self.load_axes_widgets()
+
+    def _refresh_recent_projects(self):
+        current = self.recent_projects_combo.currentData()
+        projects = self.state_store.load_recent_projects()
+        self.recent_projects_combo.blockSignals(True)
+        self.recent_projects_combo.clear()
+        for path in projects:
+            self.recent_projects_combo.addItem(Path(path).name, path)
+        if current:
+            idx = self.recent_projects_combo.findData(current)
+            if idx >= 0:
+                self.recent_projects_combo.setCurrentIndex(idx)
+        self.recent_projects_combo.blockSignals(False)
+
+    def _remember_project_path(self, path):
+        self._current_project_path = os.path.abspath(path)
+        self.state_store.remember_project(self._current_project_path)
+        self._refresh_recent_projects()
+
+    def _update_history_actions(self):
+        self.undo_btn.setEnabled(bool(self._undo_stack))
+        self.redo_btn.setEnabled(bool(self._redo_stack))
+
+    def _confirm_discard_changes(self):
+        if self._is_headless():
+            return True
+        if not self._dirty:
+            return True
+        reply = QMessageBox.question(
+            self,
+            "Unsaved changes",
+            "Save changes before continuing?",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save,
+        )
+        if reply == QMessageBox.Cancel:
+            return False
+        if reply == QMessageBox.Save:
+            return self.save_project()
+        return True
+
+    def _is_headless(self):
+        return os.getenv("QT_QPA_PLATFORM") == "offscreen"
+
+    def undo(self):
+        if not self._undo_stack:
+            return
+        current = self._snapshot_state()
+        target = self._undo_stack.pop()
+        self._redo_stack.append(current)
+        self._restore_state(target, mark_dirty=True)
+        self._update_history_actions()
+
+    def redo(self):
+        if not self._redo_stack:
+            return
+        current = self._snapshot_state()
+        target = self._redo_stack.pop()
+        self._undo_stack.append(current)
+        self._restore_state(target, mark_dirty=True)
+        self._update_history_actions()
+
+    def on_file_selected(self, idx):
+        if idx < 0:
+            self.file_preview.clear()
+            return
+        item = self.files_list.item(idx)
+        if item is None:
+            self.file_preview.clear()
+            return
+        file_key = item.data(Qt.UserRole)
+        self.file_preview.setPlainText(self._preview_file_text(file_key))
+
+    def _preview_file_text(self, path):
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = [line.rstrip("\n") for _, line in zip(range(12), f)]
+        except Exception as exc:
+            return f"Unable to preview file:\n{exc}"
+        return "\n".join(lines)
+
+    def export_plot(self, fmt):
+        filters = {
+            "png": "PNG Image (*.png)",
+            "svg": "SVG Image (*.svg)",
+            "pdf": "PDF File (*.pdf)",
+        }
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Export {fmt.upper()}",
+            "",
+            filters[fmt],
+        )
+        if not path:
+            return
+        if not path.lower().endswith(f".{fmt}"):
+            path += f".{fmt}"
+        self.canvas.fig.savefig(path, dpi=300 if fmt == "png" else None, bbox_inches="tight")
+
+    def open_recent_project(self):
+        path = self.recent_projects_combo.currentData()
+        if path:
+            self.open_project(path=path)
 
     # ------------------------------------------------------------------
     # Handlers: axis labels
@@ -509,29 +898,23 @@ class MainWindow(QMainWindow):
     # Handlers: palette
     # ------------------------------------------------------------------
     def on_palette_changed(self, name: str):
-        """
-        When palette changes:
-        - rebuild the swatch combo
-        - if a curve is selected, apply new palette + current swatch color
-        """
-        # Refresh swatch list without triggering curve updates mid-populate
         self.color_combo.blockSignals(True)
         populate_color_combo(self.color_combo, PLOTLY_PALETTES[name])
         self.color_combo.blockSignals(False)
 
-        # Apply to selected curve (if any)
         idx = self.curve_list.currentRow()
         if 0 <= idx < len(self.controller.curves):
+            before_state = self._snapshot_state()
             c = self.controller.curves[idx]
             c.palette_name = name
             c.color = selected_color(self.color_combo)
             self.controller.update_plot()
+            self._finalize_state_change(before_state)
 
     # ------------------------------------------------------------------
     # File operations
     # ------------------------------------------------------------------
     def load_file(self):
-        """Open a file picker, load data file, add it to controller.data_files."""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Open data file",
@@ -542,53 +925,73 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            before_state = self._snapshot_state()
             data_file = load_data_file(path)
             file_key = os.path.abspath(path)
             self.controller.data_files[file_key] = data_file
-
             self.refresh_files_list()
             self.populate_all_columns()
+            for i in range(self.files_list.count()):
+                item = self.files_list.item(i)
+                if item.data(Qt.UserRole) == file_key:
+                    self.files_list.setCurrentRow(i)
+                    break
+            self._finalize_state_change(before_state)
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
     def refresh_files_list(self):
-        """Rebuild the file list widget from controller state."""
+        current_key = None
+        if self.files_list.currentRow() >= 0 and self.files_list.item(self.files_list.currentRow()):
+            current_key = self.files_list.item(self.files_list.currentRow()).data(Qt.UserRole)
         self.files_list.blockSignals(True)
         self.files_list.clear()
         for file_key in self.controller.data_files:
             item = QListWidgetItem(self._display_name_for_key(file_key))
             item.setData(Qt.UserRole, file_key)
             self.files_list.addItem(item)
+        if self.files_list.count():
+            selected = 0
+            if current_key is not None:
+                for i in range(self.files_list.count()):
+                    if self.files_list.item(i).data(Qt.UserRole) == current_key:
+                        selected = i
+                        break
+            self.files_list.setCurrentRow(selected)
         self.files_list.blockSignals(False)
+        self.on_file_selected(self.files_list.currentRow())
 
     def remove_selected_file(self):
-        """Remove the currently selected file from controller and refresh UI."""
         idx = self.files_list.currentRow()
         if idx < 0:
             return
 
+        before_state = self._snapshot_state()
         file_key = self.files_list.item(idx).data(Qt.UserRole)
         self.controller.remove_file(file_key)
-
         self.refresh_files_list()
         self.populate_all_columns()
         self.refresh_curve_list()
         self.controller.update_plot()
+        self.on_file_selected(self.files_list.currentRow())
+        self._finalize_state_change(before_state)
 
     # ------------------------------------------------------------------
     # Column population (all files)
     # ------------------------------------------------------------------
     def populate_all_columns(self):
         """
-        Populate X/Y combos with items formatted:
+        Populate column combos with items formatted:
             "filename: column"
-        This lets you use X from one file and Y from another.
+        This lets you use X/Y/Z from one or more files.
         """
         self.x_combo.blockSignals(True)
         self.y_combo.blockSignals(True)
+        self.z_combo.blockSignals(True)
 
         self.x_combo.clear()
         self.y_combo.clear()
+        self.z_combo.clear()
 
         for file_key in sorted(self.controller.data_files.keys()):
             data_file = self.controller.data_files[file_key]
@@ -598,9 +1001,11 @@ class MainWindow(QMainWindow):
                 user_data = (file_key, col_name)
                 self.x_combo.addItem(display_text, user_data)
                 self.y_combo.addItem(display_text, user_data)
+                self.z_combo.addItem(display_text, user_data)
 
         self.x_combo.blockSignals(False)
         self.y_combo.blockSignals(False)
+        self.z_combo.blockSignals(False)
 
     # ------------------------------------------------------------------
     # Curve operations
@@ -610,65 +1015,67 @@ class MainWindow(QMainWindow):
         self.curve_list.blockSignals(True)
         self.curve_list.clear()
         for c in self.controller.curves:
-            self.curve_list.addItem(c.display_name())
+            self.curve_list.addItem(self._curve_display_name(c))
         self.curve_list.blockSignals(False)
 
     def add_curve(self):
-        """Create a new curve using current UI settings."""
         if not self.controller.data_files:
             return
 
+        plot_mode = getattr(self.controller.config, "plot_mode", "line2d")
         x_data = self.x_combo.currentData(Qt.UserRole)
         y_data = self.y_combo.currentData(Qt.UserRole)
+        z_data = self.z_combo.currentData(Qt.UserRole)
 
-        if not x_data or not y_data:
-            QMessageBox.warning(self, "Error", "Please select valid columns")
+        if not x_data or not y_data or (plot_mode_requires_z(plot_mode) and not z_data):
+            message = "Please select valid X, Y, and Z columns" if plot_mode_requires_z(plot_mode) else "Please select valid columns"
+            QMessageBox.warning(self, "Error", message)
             return
 
         x_file_name, x_col = x_data
         y_file_name, y_col = y_data
+        z_file_name = z_col = None
+        if z_data:
+            z_file_name, z_col = z_data
 
         x_data_file = self.controller.data_files[x_file_name]
         y_data_file = self.controller.data_files[y_file_name]
-
-        # Use x file as the "main" file for curve bookkeeping
+        z_data_file = self.controller.data_files[z_file_name] if z_file_name else None
         file_name = x_file_name
         data_file = x_data_file
-
+        render_style = self.render_style_combo.currentData() or "line"
+        before_state = self._snapshot_state()
         self.controller.add_curve(
             file_name,
             data_file,
             x_col,
             y_col,
-            self.axis_combo.currentText(),
+            self.axis_combo.currentText() if plot_mode_supports_secondary_axis(plot_mode) else "primary",
             selected_color(self.color_combo),
             self.palette_combo.currentText(),
-            # self.marker_combo.currentText(),
-            # self.marker_size_combo.value(),
-            # linestyle=self.linestyle_combo.currentText(),
-            # linewidth=float(self.linewidth_combo.currentText()),
+            render_style=render_style if plot_mode == "plot3d" else "line",
             x_data_file=x_data_file,
             y_data_file=y_data_file,
+            z_col=z_col if plot_mode_requires_z(plot_mode) else None,
+            z_data_file=z_data_file if plot_mode_requires_z(plot_mode) else None,
         )
-
         self.refresh_curve_list()
-
-        # Select the newly added curve and sync UI
         new_idx = len(self.controller.curves) - 1
         self.curve_list.setCurrentRow(new_idx)
         self.on_curve_selected(new_idx)
-
         self.controller.update_plot()
+        self._finalize_state_change(before_state)
 
     def remove_selected_curve(self):
-        """Remove selected curve from controller and redraw."""
         idx = self.curve_list.currentRow()
         if idx < 0:
             return
 
+        before_state = self._snapshot_state()
         self.controller.remove_curve(idx)
         self.refresh_curve_list()
         self.controller.update_plot()
+        self._finalize_state_change(before_state)
 
     # ------------------------------------------------------------------
     # Curve selection -> UI synchronization
@@ -681,21 +1088,22 @@ class MainWindow(QMainWindow):
         if idx < 0 or idx >= len(self.controller.curves):
             return
         c = self.controller.curves[idx]
+        plot_mode = getattr(self.controller.config, "plot_mode", "line2d")
 
-        # Block signals for all widgets we will set
         widgets_to_block = [
-            self.x_combo, self.y_combo, self.axis_combo, self.curve_name_edit,
+            self.x_combo, self.y_combo, self.z_combo, self.axis_combo, self.curve_name_edit,
+            self.render_style_combo,
             self.palette_combo, self.color_combo, self.subplot_index_combo
         ]
         for w in widgets_to_block:
             w.blockSignals(True)
 
-        # Basic properties
         self.curve_name_edit.setText(c.name)
         self.subplot_index_combo.setCurrentText(str(c.subplot_index))
 
         x_file_name = self._find_key_for_data_file(c.x_data_file)
         y_file_name = self._find_key_for_data_file(c.y_data_file)
+        z_file_name = self._find_key_for_data_file(c.z_data_file) if c.z_data_file is not None else None
 
         if x_file_name:
             self._set_combo_to_column(self.x_combo, x_file_name, c.x_col)
@@ -703,40 +1111,39 @@ class MainWindow(QMainWindow):
         if y_file_name:
             self._set_combo_to_column(self.y_combo, y_file_name, c.y_col)
 
-        # Axis + style
-        self.axis_combo.setCurrentText(c.axis)
-        # self.marker_combo.setCurrentText(c.marker)
-        # self.marker_size_combo.setValue(c.marker_size)
-        # self.linestyle_combo.setCurrentText(c.linestyle)
-        # self.linewidth_combo.setCurrentText(str(c.linewidth))
-        self.palette_combo.setCurrentText(c.palette_name)
+        if z_file_name and c.z_col:
+            self._set_combo_to_column(self.z_combo, z_file_name, c.z_col)
 
-        # Rebuild swatches for this palette and ensure curve color exists/select it
+        if plot_mode_supports_secondary_axis(plot_mode):
+            self.axis_combo.setCurrentText(c.axis)
+        if plot_mode_supports_render_style(plot_mode):
+            render_idx = self.render_style_combo.findData(getattr(c, "render_style", "line"))
+            if render_idx >= 0:
+                self.render_style_combo.setCurrentIndex(render_idx)
+        self.palette_combo.setCurrentText(c.palette_name)
         populate_color_combo(self.color_combo, PLOTLY_PALETTES[c.palette_name])
         ensure_color_in_combo(self.color_combo, c.color)
-
-        # Unblock signals
         for w in widgets_to_block:
             w.blockSignals(False)
+        self._apply_plot_mode_ui()
 
     # ------------------------------------------------------------------
     # Curve edits -> controller update
     # ------------------------------------------------------------------
     def on_curve_settings_changed(self, *args):
 
-        """
-        Called when any curve setting widget changes.
-        Updates the currently selected curve in the controller.
-        """
         idx = self.curve_list.currentRow()
         if idx < 0 or idx >= len(self.controller.curves):
             return
 
+        before_state = self._snapshot_state()
         c = self.controller.curves[idx]
+        plot_mode = getattr(self.controller.config, "plot_mode", "line2d")
         c.name = self.curve_name_edit.text().strip() or c.name
 
         x_data = self.x_combo.currentData(Qt.UserRole)
         y_data = self.y_combo.currentData(Qt.UserRole)
+        z_data = self.z_combo.currentData(Qt.UserRole)
 
         if x_data:
             x_file_name, x_col = x_data
@@ -751,91 +1158,65 @@ class MainWindow(QMainWindow):
         else:
             y_col = c.y_col
 
-        # Update curve in controller/model
+        if plot_mode_requires_z(plot_mode) and z_data:
+            z_file_name, z_col = z_data
+            c.z_data_file = self.controller.data_files[z_file_name]
+        else:
+            z_col = c.z_col
+
+        render_style = self.render_style_combo.currentData() or getattr(c, "render_style", "line")
         self.controller.update_curve(
             idx,
             x_col,
             y_col,
-            self.axis_combo.currentText(),
+            self.axis_combo.currentText() if plot_mode_supports_secondary_axis(plot_mode) else "primary",
             selected_color(self.color_combo),
             c.palette_name,
-            # self.marker_combo.currentText(),
-            # self.marker_size_combo.value(),
-            # linestyle=self.linestyle_combo.currentText(),
-            # linewidth=float(self.linewidth_combo.currentText()),
             subplot_index=int(self.subplot_index_combo.currentText() or "0"),
+            z_col=z_col if plot_mode_requires_z(plot_mode) else c.z_col,
+            render_style=render_style if plot_mode == "plot3d" else "line",
         )
 
-        # Keep curve list in sync and keep selection
-        # Keep curve list text in sync WITHOUT losing selection
         item = self.curve_list.item(idx)
 
         if item is not None:
-            item.setText(self.controller.curves[idx].display_name())
+            item.setText(self._curve_display_name(self.controller.curves[idx]))
         else:
-            # fallback (shouldn't happen)
-            print("fallback")
             self.refresh_curve_list()
             self.curve_list.setCurrentRow(idx)
 
         self.curve_list.setCurrentRow(idx)
+        self._apply_plot_mode_ui()
 
         self.controller.update_plot()
+        self._finalize_state_change(before_state)
 
     # ------------------------------------------------------------------
     # Canvas settings -> config update
     # ------------------------------------------------------------------
     def on_canvas_settings_changed(self, *args):
 
-        """
-        Update global canvas settings (ratio + axis limits).
-        Limits accept empty entries meaning "auto".
-        """
         dim_text = self.dimension_combo.currentText()
-
-        # xmin_text = self.x_min_edit.text().strip()
-        # xmax_text = self.x_max_edit.text().strip()
-        # ymin_text = self.y_min_edit.text().strip()
-        # ymax_text = self.y_max_edit.text().strip()
-
-        # self.controller.config.xticksN = self.x_ticks_edit.value()
-        # self.controller.config.yticksN = self.y_ticks_edit.value()
-        # self.controller.config.minor_ticks = self.minor_ticks_checkbox.isChecked()
-        # self.controller.config.minor_grid = self.minor_ticks_checkbox.isChecked()
-        # self.controller.config.grid = self.major_grid_checkbox.isChecked()
-        # self.controller.config.minor_grid = self.minor_grid_checkbox.isChecked()
-
         try:
-            # Ratio (tuple like (4,3))
-            # self.apply_subplot_limits()
+            before_state = self._snapshot_state()
             self.apply_subplot_ticks()
             self.controller.config.ratio = literal_eval(dim_text)
-
-            # Limits: empty => None
-            # self.controller.config.xlimits = (
-            #     float(xmin_text) if xmin_text else None,
-            #     float(xmax_text) if xmax_text else None,
-            # )
-            # self.controller.config.ylimits = (
-            #     float(ymin_text) if ymin_text else None,
-            #     float(ymax_text) if ymax_text else None,
-            # )
-
             self.controller.update_plot()
+            self._finalize_state_change(before_state)
         except Exception:
-            # Ignore bad inputs (e.g. partially typed numbers)
             pass
 
     def open_advanced_dialog(self):
         dlg = AdvancedDialog(self.controller.config, parent=self)
         if dlg.exec_() == QDialog.Accepted:
-
+            before_state = self._snapshot_state()
             dlg.apply_to_config()
             self.controller.normalize_curve_subplots()
             self.controller.update_plot()
             max_index = dlg.get_max_subplot_index()
             self.populate_subplot_indices(max_index)
             self.refresh_subplot_list()
+            self._finalize_state_change(before_state)
 
     def populate_subplot_indices(self, max_index):
         self.subplot_index_combo.blockSignals(True)
@@ -903,6 +1284,7 @@ class MainWindow(QMainWindow):
         # self.y_max_edit.blockSignals(True)
         self.x_ticks_edit.blockSignals(True)
         self.y_ticks_edit.blockSignals(True)
+        self.z_ticks_edit.blockSignals(True)
 
 
 
@@ -912,6 +1294,7 @@ class MainWindow(QMainWindow):
         # ylim   = ov.get("ylim", cfg.ylimits)
         xtN    = ov.get("xticksN", cfg.xticksN)
         ytN    = ov.get("yticksN", cfg.yticksN)
+        ztN    = ov.get("zticksN", cfg.zticksN)
 
         # --- fill widgets ---
         # self.xlabel_edit.setText(xlabel or "")
@@ -926,6 +1309,8 @@ class MainWindow(QMainWindow):
             self.x_ticks_edit.setValue(int(xtN))
         if ytN is not None:
             self.y_ticks_edit.setValue(int(ytN))
+        if ztN is not None:
+            self.z_ticks_edit.setValue(int(ztN))
 
         # Unblock signals
         # self.xlabel_edit.blockSignals(False)
@@ -936,6 +1321,7 @@ class MainWindow(QMainWindow):
         # self.y_max_edit.blockSignals(False)
         self.x_ticks_edit.blockSignals(False)
         self.y_ticks_edit.blockSignals(False)
+        self.z_ticks_edit.blockSignals(False)
 
     def apply_subplot_labels(self):
         cfg = self.controller.config
@@ -1037,10 +1423,12 @@ class MainWindow(QMainWindow):
         cfg = self.controller.config
         xtN = self.x_ticks_edit.value()
         ytN = self.y_ticks_edit.value()
+        ztN = self.z_ticks_edit.value()
         # No subplot selected -> write global
         if self._active_subplot is None:
             cfg.xticksN = xtN
             cfg.yticksN = ytN
+            cfg.zticksN = ztN
             return
         rows, cols = cfg.subplot_layout
         i0 = int(self._active_subplot)
@@ -1067,6 +1455,9 @@ class MainWindow(QMainWindow):
         else:
             ov = cfg.subplots_config.setdefault(i0, {})
             ov["yticksN"] = ytN
+
+        ov = cfg.subplots_config.setdefault(i0, {})
+        ov["zticksN"] = ztN
 
     def _sync_labels_from_mpl(self, event=None):
         if self._skip_next_draw_event:
@@ -1205,49 +1596,61 @@ class MainWindow(QMainWindow):
         for i, ax in enumerate(getattr(self.canvas, "axes", [])):
             xlim = ax.get_xlim()
             ylim = ax.get_ylim()
-            cfg.subplots_config.setdefault(i, {})["xlim"] = (xlim[0], xlim[1])
-            cfg.subplots_config.setdefault(i, {})["ylim"] = (ylim[0], ylim[1])
+            subplot_cfg = cfg.subplots_config.setdefault(i, {})
+            subplot_cfg["xlim"] = (xlim[0], xlim[1])
+            subplot_cfg["ylim"] = (ylim[0], ylim[1])
+            subplot_cfg["xticksN"] = max(1, len(ax.get_xticks()))
+            subplot_cfg["yticksN"] = max(1, len(ax.get_yticks()))
+            if hasattr(ax, "get_zticks"):
+                subplot_cfg["zticksN"] = max(1, len(ax.get_zticks()))
+
+        if getattr(self.controller.config, "plot_mode", "line2d") == "plot3d" and getattr(self.canvas, "axes", []):
+            first_ax = self.canvas.axes[0]
+            if hasattr(first_ax, "get_zticks"):
+                cfg.zticksN = max(1, len(first_ax.get_zticks()))
+                self.load_axes_widgets()
 
 
-    def save_project(self):
+    def save_project(self, checked=False, path=None):
+        if path is None and self._current_project_path:
+            path = self._current_project_path
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save plot project", "", "Plot Project (*.pproj *.json)"
-        )
+            self, "Save plot project", path or "", "Plot Project (*.pproj *.json)"
+        ) if path is None else (path, "")
         if not path:
-            return
+            return False
         if not (path.endswith(".pproj") or path.endswith(".json")):
             path += ".pproj"
         self.controller.save_project(path)
+        self._remember_project_path(path)
+        self._set_dirty(False)
+        return True
 
-    def open_project(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open plot project", "", "Plot Project (*.pproj *.json)"
-        )
+    def open_project(self, checked=False, path=None):
+        if not self._confirm_discard_changes():
+            return False
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Open plot project", "", "Plot Project (*.pproj *.json)"
+            )
         if not path:
-            return
+            return False
 
         missing = self.controller.load_project(path)
-
-        # Refresh UI after load
-        self.refresh_files_list()
-        self.populate_all_columns()
-        self.refresh_curve_list()
-        self.refresh_subplot_list()
-        rows, cols = self.controller.config.subplot_layout
-        self.populate_subplot_indices(rows * cols - 1)
-
-
-        # self.xlabel_edit.setText(self.controller.config.xlabel)
-        # self.ylabel_edit.setText(self.controller.config.ylabel)
-        if self.controller.curves:
-            self.curve_list.setCurrentRow(0)
-            self.on_curve_selected(0)
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._update_history_actions()
+        self._remember_project_path(path)
+        self._refresh_all_ui()
+        self._show_workspace()
+        self._set_dirty(False)
 
         if missing:
             msg = "Some files were missing and related curves were skipped:\n\n" + "\n".join(
                 f"- {k}: {p}" for k, p in missing
             )
             QMessageBox.warning(self, "Missing data files", msg)
+        return True
 
     def _display_name_for_key(self, file_key: str) -> str:
         base = os.path.basename(file_key)

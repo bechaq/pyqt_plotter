@@ -1,4 +1,3 @@
-from DataFile import load_data_file
 from Curves import Curve
 from PlotConfig import PlotConfig
 import json
@@ -26,15 +25,54 @@ class AppController:
             # Remove curves that depend on the deleted data source on either axis.
             self.curves = [
                 c for c in self.curves
-                if c.x_data_file is not removed_data_file and c.y_data_file is not removed_data_file
+                if c.x_data_file is not removed_data_file
+                and c.y_data_file is not removed_data_file
+                and c.z_data_file is not removed_data_file
             ]
             self.update_plot()
 
 
-    def add_curve(self, file_name, data_file, x_col, y_col, axis, color, palette_name="Plotly", marker=None, marker_size=None, linestyle="-", linewidth=2.0, x_data_file=None, y_data_file=None):
+    def add_curve(
+        self,
+        file_name,
+        data_file,
+        x_col,
+        y_col,
+        axis,
+        color,
+        palette_name="Plotly",
+        marker=None,
+        marker_size=None,
+        linestyle="-",
+        linewidth=2.0,
+        render_style="line",
+        x_data_file=None,
+        y_data_file=None,
+        z_col=None,
+        z_data_file=None,
+    ):
         name = f"Curve {self.curve_counter}"
         self.curve_counter += 1
-        curve = Curve(file_name, data_file, x_col, y_col, axis, name=name, color=color, palette_name=palette_name, marker=marker, marker_size=marker_size, linestyle=linestyle, linewidth=linewidth, x_data_file=x_data_file, y_data_file=y_data_file, subplot_index=0)
+        curve = Curve(
+            file_name,
+            data_file,
+            x_col,
+            y_col,
+            axis,
+            name=name,
+            color=color,
+            palette_name=palette_name,
+            marker=marker,
+            marker_size=marker_size,
+            linestyle=linestyle,
+            linewidth=linewidth,
+            render_style=render_style,
+            x_data_file=x_data_file,
+            y_data_file=y_data_file,
+            z_col=z_col,
+            z_data_file=z_data_file,
+            subplot_index=0,
+        )
         self.curves.append(curve)
         self.update_plot()
         return curve
@@ -45,12 +83,25 @@ class AppController:
             # self.curve_counter -= 1
             self.update_plot()
 
-    def update_curve(self, idx, x_col, y_col, axis, color, palette_name="Plotly",  subplot_index=0):
+    def update_curve(
+        self,
+        idx,
+        x_col,
+        y_col,
+        axis,
+        color,
+        palette_name="Plotly",
+        subplot_index=0,
+        z_col=None,
+        render_style="line",
+    ):
         c = self.curves[idx]
         c.x_col = x_col
         c.y_col = y_col
+        c.z_col = z_col
         c.axis = axis
         c.color = color   
+        c.render_style = render_style
         # c.marker = Marker
         # c.marker_size = marker_size
         # c.palette_name = palette_name
@@ -68,13 +119,15 @@ class AppController:
         for curve in self.curves:
             curve.subplot_index = max(0, min(int(curve.subplot_index), max_index))
     
-    def to_dict(self) -> dict:
+    def to_dict(self, project_dir: str | None = None) -> dict:
         """Export the full editable plot state."""
-        # data_files: store original paths; you need to keep them somewhere
-        # Recommended: store DataFile.path when loading, and use that.
-        data_files = {name: df.path for name, df in self.data_files.items()}
+        data_files = {
+            name: self._serialize_path(df.path, project_dir)
+            for name, df in self.data_files.items()
+        }
 
         config = {
+            "plot_mode": getattr(self.config, "plot_mode", "line2d"),
             "xlabel": self.config.xlabel,
             "ylabel": self.config.ylabel,
             "ratio": list(self.config.ratio),
@@ -86,6 +139,7 @@ class AppController:
             "legend": bool(self.config.legend),
             "xticksN": getattr(self.config, "xticksN", None),
             "yticksN": getattr(self.config, "yticksN", None),
+            "zticksN": getattr(self.config, "zticksN", None),
             "palette_name": getattr(self.config, "palette_name", "Plotly"),
             "subplot_layout":getattr(self.config, "subplot_layout", (1,1)),
             "shared_x": getattr(self.config, "shared_x", False),
@@ -102,6 +156,8 @@ class AppController:
                 "x_col": c.x_col,
                 "y_file": self._find_file_key(c.y_data_file),
                 "y_col": c.y_col,
+                "z_file": self._find_file_key(c.z_data_file) if c.z_data_file is not None else None,
+                "z_col": c.z_col,
                 "color": c.color,
                 "palette_name": getattr(c, "palette_name", "Plotly"),
                 "marker": c.marker,
@@ -110,6 +166,7 @@ class AppController:
                 "marker_edge_color": c.marker_edge_color,
                 "linestyle": c.linestyle,
                 "linewidth": c.linewidth,
+                "render_style": getattr(c, "render_style", "line"),
                 "subplot_index": c.subplot_index,
 
             })
@@ -117,20 +174,22 @@ class AppController:
         return {"version": 1, "data_files": data_files, "config": config, "curves": curves}
 
     def save_project(self, project_path: str):
+        project_dir = os.path.dirname(os.path.abspath(project_path))
         with open(project_path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, indent=2)
+            json.dump(self.to_dict(project_dir=project_dir), f, indent=2)
 
     def load_project(self, project_path: str):
-        """
-        Load project and rebuild controller state.
-        If some data files are missing, we skip curves that depend on them,
-        and you can warn the user.
-        """
-        import json
-        from DataFile import load_data_file
-
         with open(project_path, "r", encoding="utf-8") as f:
             obj = json.load(f)
+        project_dir = os.path.dirname(os.path.abspath(project_path))
+        return self.load_state_obj(obj, base_dir=project_dir)
+
+    def load_state_obj(self, obj: dict, base_dir: str | None = None):
+        """
+        Load a serialized controller state from an in-memory dict.
+        If some data files are missing, we skip curves that depend on them.
+        """
+        from DataFile import load_data_file
 
         # Reset current state
         self.data_files.clear()
@@ -139,14 +198,16 @@ class AppController:
         # Reload data files
         missing = []
         for key, path in obj.get("data_files", {}).items():
-            if not os.path.exists(path):
-                missing.append((key, path))
+            resolved = self._resolve_path(path, base_dir)
+            if not os.path.exists(resolved):
+                missing.append((key, resolved))
                 continue
-            df = load_data_file(path)
+            df = load_data_file(resolved)
             self.data_files[key] = df
 
         # Restore config
         cfg = obj.get("config", {})
+        self.config.plot_mode = cfg.get("plot_mode", "line2d")
         self.config.xlabel = cfg.get("xlabel", "")
         self.config.ylabel = cfg.get("ylabel", "")
         self.config.ratio = tuple(cfg.get("ratio", [4, 3]))
@@ -158,6 +219,7 @@ class AppController:
         self.config.minor_grid = cfg.get("minor_grid", False)
         self.config.xticksN = cfg.get("xticksN", None)
         self.config.yticksN = cfg.get("yticksN", None)
+        self.config.zticksN = cfg.get("zticksN", self.config.yticksN)
         self.config.palette_name = cfg.get("palette_name", "Plotly")
         self.config.dirty = True
         self.config.subplot_layout = tuple(cfg.get("subplot_layout", (1, 1)))
@@ -176,21 +238,25 @@ class AppController:
         
 
         # Restore curves (only if their referenced files exist)
+        requires_z = self.config.plot_mode in {"heatmap2d", "plot3d"}
         for c in obj.get("curves", []):
             x_key = c.get("x_file")
             y_key = c.get("y_file")
             if x_key not in self.data_files or y_key not in self.data_files:
                 continue
+            z_key = c.get("z_file")
+            if requires_z and (not c.get("z_col") or z_key not in self.data_files):
+                continue
 
             curve = self._make_curve_from_dict(c)
             self.curves.append(curve)
+        self.curve_counter = len(self.curves) + 1
         self.normalize_curve_subplots()
         self.update_plot()
 
         # Finally, apply xlim/ylim per subplot if any
         for ax in self.canvas.axes:
             ov = self.config.subplots_config.get(self.canvas.axes.index(ax), {})
-            rows, cols = self.config.subplot_layout
             ax.set_xlim(ov.get("xlim", self.config.xlimits) or self.config.xlimits)
             ax.set_ylim(ov.get("ylim", self.config.ylimits) or self.config.ylimits)
         return missing
@@ -205,6 +271,8 @@ class AppController:
         from Curves import Curve  # adjust to your actual import
         x_df = self.data_files[d["x_file"]]
         y_df = self.data_files[d["y_file"]]
+        z_key = d.get("z_file")
+        z_df = self.data_files.get(z_key) if z_key else None
 
         curve = Curve(
             file_name=d["x_file"],
@@ -220,9 +288,25 @@ class AppController:
             marker_edge_color=d.get("marker_edge_color", None),
             linestyle=d.get("linestyle", "-"),
             linewidth=d.get("linewidth", 2.0),
+            render_style=d.get("render_style", "line"),
             x_data_file=x_df,
             y_data_file=y_df,
+            z_col=d.get("z_col"),
+            z_data_file=z_df,
             name=d.get("name", "Curve"),
             subplot_index=d.get("subplot_index", 0),
         )
         return curve
+
+    def _serialize_path(self, path: str, project_dir: str | None):
+        if not project_dir:
+            return path
+        try:
+            return os.path.relpath(path, project_dir)
+        except ValueError:
+            return path
+
+    def _resolve_path(self, path: str, base_dir: str | None):
+        if base_dir and not os.path.isabs(path):
+            return os.path.abspath(os.path.join(base_dir, path))
+        return path

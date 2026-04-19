@@ -1,10 +1,10 @@
 {
   "version": 1,
   "data_files": {
-    "test_data.txt": "C:/Users/bench/OneDrive/Documents/\u00c9cole/Code/pyqt_plotter/test_data.txt"
+    "C:\\Users\\bench\\OneDrive\\Documents\\\u00c9cole\\Code\\pyqt_plotter\\test_data.txt": "test_data.txt"
   },
   "config": {
-    "xlabel": "X 1",
+    "xlabel": "X",
     "ylabel": "Y",
     "ratio": [
       1,
@@ -19,145 +19,64 @@
       null
     ],
     "grid": true,
-    "minor_ticks": true,
-    "minor_grid": true,
+    "minor_ticks": false,
+    "minor_grid": false,
     "legend": true,
-    "xticksN": 5,
-    "yticksN": 15,
-    "palette_name": "Plotly",
+    "xticksN": 6,
+    "yticksN": 6,
+    "palette_name": "Matplotlib default",
     "subplot_layout": [
       2,
-      2
+      1
     ],
-    "shared_x": true,
+    "shared_x": false,
     "shared_y": false,
     "subplots_config": {
       "0": {
-        "xlabel": "X 1",
-        "ylabel": "Y",
-        "xlim": [
-          3.8021338651377286,
-          6.49511155428144
-        ],
-        "ylim": [
-          3.3573554318896672,
-          6.720433099443502
-        ]
-      },
-      "1": {
         "xlabel": "X",
         "ylabel": "Y",
         "xlim": [
-          0.6,
-          9.4
+          1.6,
+          10.4
         ],
         "ylim": [
-          0.6,
-          9.4
-        ],
-        "xticksN": 11,
-        "yticksN": 15
-      },
-      "2": {
-        "xlabel": "X 1",
-        "ylabel": "Y",
-        "xlim": [
-          3.8021338651377286,
-          6.49511155428144
-        ],
-        "ylim": [
-          0.0,
-          1.0
-        ]
-      },
-      "3": {
-        "xlabel": "X",
-        "ylabel": "Y",
-        "xlim": [
-          0.6,
-          9.4
-        ],
-        "ylim": [
-          0.0,
-          1.0
-        ],
-        "xticksN": 5,
-        "yticksN": 18
-      },
-      "4": {
-        "xlabel": "X",
-        "ylabel": "Y",
-        "xlim": [
-          0.0,
-          1.0
-        ],
-        "ylim": [
-          0.0,
-          1.0
-        ]
-      },
-      "5": {
-        "xlabel": "X",
-        "ylabel": "Y",
-        "xlim": [
-          0.0,
-          1.0
-        ],
-        "ylim": [
-          0.0,
-          1.0
+          2.6,
+          11.4
         ]
       }
     }
   },
   "curves": [
     {
-      "name": "CACA",
+      "name": "Curve 1",
       "axis": "primary",
-      "x_file": "test_data.txt",
-      "x_col": "Column1",
-      "y_file": "test_data.txt",
-      "y_col": "Column1",
-      "color": "#ff0000",
+      "x_file": "C:\\Users\\bench\\OneDrive\\Documents\\\u00c9cole\\Code\\pyqt_plotter\\test_data.txt",
+      "x_col": "Column2",
+      "y_file": "C:\\Users\\bench\\OneDrive\\Documents\\\u00c9cole\\Code\\pyqt_plotter\\test_data.txt",
+      "y_col": "Column3",
+      "color": "#19d3f3",
       "palette_name": "Plotly",
-      "marker": "h",
-      "marker_size": 12,
-      "marker_face_color": "#ffffffff",
-      "marker_edge_color": "#000000ff",
+      "marker": "H",
+      "marker_size": 6,
+      "marker_face_color": "#19d3f3ff",
+      "marker_edge_color": "#19d3f3ff",
       "linestyle": "-",
       "linewidth": 2.0,
       "subplot_index": 0
     },
     {
-      "name": "nani",
+      "name": "Curve 2",
       "axis": "primary",
-      "x_file": "test_data.txt",
+      "x_file": "C:\\Users\\bench\\OneDrive\\Documents\\\u00c9cole\\Code\\pyqt_plotter\\test_data.txt",
       "x_col": "Column1",
-      "y_file": "test_data.txt",
-      "y_col": "Column2",
-      "color": "#55aa00",
+      "y_file": "C:\\Users\\bench\\OneDrive\\Documents\\\u00c9cole\\Code\\pyqt_plotter\\test_data.txt",
+      "y_col": "Column3",
+      "color": "#00CC96",
       "palette_name": "Plotly",
-      "marker": "8",
-      "marker_size": 12,
-      "marker_face_color": "#ffffffff",
-      "marker_edge_color": "#55aa00ff",
-      "linestyle": "None",
-      "linewidth": 2.0,
-      "subplot_index": 0
-    },
-    {
-      "name": "Curve 1",
-      "axis": "primary",
-      "x_file": "test_data.txt",
-      "x_col": "Column1",
-      "y_file": "test_data.txt",
-      "y_col": "Column1",
-      "color": "#B6E880",
-      "palette_name": "Plotly",
-      "marker": "None",
-      "marker_size": 6,
-      "marker_face_color": "#55557f",
-      "marker_edge_color": "#55557f",
+      "marker": null,
+      "marker_size": null,
+      "marker_face_color": null,
+      "marker_edge_color": null,
       "linestyle": "-",
       "linewidth": 2.0,
       "subplot_index": 1
