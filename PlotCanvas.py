@@ -1,12 +1,95 @@
 from Color_modules import PLOTLY_PALETTES
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.cm import ScalarMappable
-from matplotlib.colors import LinearSegmentedColormap, Normalize
+from matplotlib.colors import LinearSegmentedColormap, Normalize, to_rgba
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
-from matplotlib.ticker import AutoMinorLocator, MaxNLocator
+from matplotlib.ticker import AutoMinorLocator, LinearLocator
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 import numpy as np
+
+
+MAX_RENDERED_LINE_POINTS = 50_000
+
+
+def _stride_indices(length, max_points):
+    if max_points <= 1:
+        return np.array([0], dtype=int)
+    return np.linspace(0, length - 1, max_points, dtype=int)
+
+
+def _line_downsample_indices(y, max_points):
+    length = len(y)
+    if length <= max_points:
+        return None
+    if max_points < 3:
+        return _stride_indices(length, max_points)
+
+    bin_count = max(1, (max_points - 2) // 2)
+    edges = np.linspace(1, length - 1, bin_count + 1, dtype=int)
+    indices = [0]
+
+    for start, end in zip(edges[:-1], edges[1:]):
+        if end <= start:
+            continue
+
+        segment = y[start:end]
+        finite_positions = np.flatnonzero(np.isfinite(segment))
+        if finite_positions.size == 0:
+            chosen = [start]
+        else:
+            finite_values = segment[finite_positions]
+            min_index = start + finite_positions[int(np.argmin(finite_values))]
+            max_index = start + finite_positions[int(np.argmax(finite_values))]
+            chosen = sorted((min_index, max_index))
+
+        for index in chosen:
+            if index != indices[-1]:
+                indices.append(index)
+
+    if indices[-1] != length - 1:
+        indices.append(length - 1)
+
+    if len(indices) > max_points:
+        return _stride_indices(length, max_points)
+    return np.asarray(indices, dtype=int)
+
+
+def downsample_line_points(x, y, max_points=MAX_RENDERED_LINE_POINTS):
+    x = np.asarray(x)
+    y = np.asarray(y)
+    indices = _line_downsample_indices(y, max_points)
+    if indices is None:
+        return x, y
+    return x[indices], y[indices]
+
+
+def _same_length(*arrays):
+    lengths = [len(array) for array in arrays if array is not None]
+    return len(set(lengths)) <= 1
+
+
+def _apply_major_locator(axis, tick_count):
+    if tick_count is None:
+        return
+    axis.set_major_locator(LinearLocator(numticks=max(1, int(tick_count))))
+
+
+def _curve_zorder(curve_count, curve_index):
+    return max(1, curve_count - curve_index)
+
+
+def _curve_opacity(curve):
+    try:
+        value = float(getattr(curve, "opacity", 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+    return max(0.0, min(1.0, value))
+
+
+def _scaled_alpha(curve, base_alpha=1.0):
+    return max(0.0, min(1.0, base_alpha * _curve_opacity(curve)))
+
 
 class PlotCanvas(FigureCanvas):
     def __init__(self):
@@ -28,20 +111,13 @@ class PlotCanvas(FigureCanvas):
             or self._last_plot_mode != getattr(config, "plot_mode", "line2d")
         )
 
+        self._remove_colorbars()
+        self._create_subplots(layout, config.shared_x, config.shared_y, config)
         if need_rebuild:
-            self._create_subplots(layout, config.shared_x, config.shared_y, config)
             self._last_layout = layout
             self._last_shared_x = config.shared_x
             self._last_shared_y = config.shared_y
             self._last_plot_mode = getattr(config, "plot_mode", "line2d")
-            
-        else:
-            for ax in self.axes:
-                ax.clear()
-            for ax2 in self.ax2.values():
-                ax2.remove()
-            self.ax2.clear()
-            self._remove_colorbars()
 
 
     def ratio_to_inches(self, ratio):
@@ -95,7 +171,8 @@ class PlotCanvas(FigureCanvas):
     
     def _draw_lines(self, curves, config):
         max_index = max(0, len(self.axes) - 1)
-        for curve in curves:
+        curve_count = len(curves)
+        for curve_index, curve in enumerate(curves):
             i = self._normalized_subplot_index(curve, max_index)
             ax = self.axes[i]
 
@@ -106,7 +183,12 @@ class PlotCanvas(FigureCanvas):
                     self.ax2[i] = secondary_ax
                 ax = secondary_ax
 
-            x, y = curve.xy()
+            x_raw, y_raw = curve.xy()
+            if not _same_length(x_raw, y_raw):
+                curve._mpl_line = None
+                continue
+
+            x, y = downsample_line_points(x_raw, y_raw)
             (line,) = ax.plot(
                 x,
                 y,
@@ -118,6 +200,8 @@ class PlotCanvas(FigureCanvas):
                 markeredgecolor=curve.marker_edge_color,
                 linestyle=curve.linestyle,
                 linewidth=curve.linewidth,
+                zorder=_curve_zorder(curve_count, curve_index),
+                alpha=_curve_opacity(curve),
             )
             curve._mpl_line = line
 
@@ -150,10 +234,8 @@ class PlotCanvas(FigureCanvas):
                 ax.set_xlim(xlim)
             if ylim is not None:
                 ax.set_ylim(ylim)
-            if xticks is not None:
-                ax.xaxis.set_major_locator(MaxNLocator(xticks))
-            if yticks is not None:
-                ax.yaxis.set_major_locator(MaxNLocator(yticks))
+            _apply_major_locator(ax.xaxis, xticks)
+            _apply_major_locator(ax.yaxis, yticks)
 
             if rows > 1 and config.shared_x and r > 0:
                 yticks_labels = ax.get_yticklabels()
@@ -178,8 +260,7 @@ class PlotCanvas(FigureCanvas):
                     right=True,
                     labelright=True,
                 )
-                if yticks is not None:
-                    ax2.yaxis.set_major_locator(MaxNLocator(yticks))
+                _apply_major_locator(ax2.yaxis, yticks)
                 self._apply_minor_ticks(ax2, config.minor_ticks, include_x=False)
                 ax2.grid(False, which="both")
 
@@ -198,24 +279,33 @@ class PlotCanvas(FigureCanvas):
         subplot_artists = {}
         subplot_labels = {}
 
-        for curve in curves:
+        curve_count = len(curves)
+        for curve_index, curve in enumerate(curves):
             i = self._normalized_subplot_index(curve, max_index)
             ax = self.axes[i]
             x, y, z = curve.xyz()
-            if z is None:
+            if z is None or not _same_length(x, y, z):
                 continue
 
             cmap = self._colormap_for_curve(curve)
+            zorder = _curve_zorder(curve_count, curve_index)
             try:
-                if len(x) >= 3:
-                    artist = ax.tripcolor(x, y, z, shading="auto", cmap=cmap)
+                if getattr(curve, "uses_colormap", True):
+                    if len(x) >= 3:
+                        artist = ax.tripcolor(x, y, z, shading="auto", cmap=cmap, zorder=zorder, alpha=_curve_opacity(curve))
+                    else:
+                        artist = ax.scatter(x, y, c=z, cmap=cmap, zorder=zorder, alpha=_curve_opacity(curve))
                 else:
-                    artist = ax.scatter(x, y, c=z, cmap=cmap)
+                    if len(x) >= 3:
+                        artist = ax.tripcolor(x, y, z, shading="flat", color=curve.color, zorder=zorder, alpha=_curve_opacity(curve))
+                    else:
+                        artist = ax.scatter(x, y, c=curve.color, s=36, zorder=zorder, alpha=_curve_opacity(curve))
             except Exception:
-                artist = ax.scatter(x, y, c=z, cmap=cmap)
+                artist = ax.scatter(x, y, c=z, cmap=cmap, zorder=zorder, alpha=_curve_opacity(curve)) if getattr(curve, "uses_colormap", True) else ax.scatter(x, y, c=curve.color, s=36, zorder=zorder, alpha=_curve_opacity(curve))
 
+            setattr(artist, "_plotter_curve", curve)
             subplot_artists[i] = artist
-            subplot_labels[i] = curve.z_col or curve.name or "Value"
+            subplot_labels[i] = self._colorbar_label(curve, curve.z_col or curve.name or "Value")
 
         for i, ax in enumerate(self.axes):
             ov = config.subplots_config.get(i, {})
@@ -242,10 +332,8 @@ class PlotCanvas(FigureCanvas):
                 ax.set_xlim(xlim)
             if ylim is not None:
                 ax.set_ylim(ylim)
-            if xticks is not None:
-                ax.xaxis.set_major_locator(MaxNLocator(xticks))
-            if yticks is not None:
-                ax.yaxis.set_major_locator(MaxNLocator(yticks))
+            _apply_major_locator(ax.xaxis, xticks)
+            _apply_major_locator(ax.yaxis, yticks)
 
             self._apply_minor_ticks(ax, config.minor_ticks)
             ax.grid(config.grid, which="major")
@@ -255,8 +343,8 @@ class PlotCanvas(FigureCanvas):
                 ax.grid(False, which="minor")
 
             artist = subplot_artists.get(i)
-            if artist is not None:
-                colorbar = self.fig.colorbar(artist, ax=ax)
+            if artist is not None and self._should_show_colorbar(curves, i):
+                colorbar = self.fig.colorbar(artist, ax=ax, **self._colorbar_kwargs(ax))
                 colorbar.set_label(subplot_labels.get(i, "Value"))
                 self._colorbars.append(colorbar)
 
@@ -265,32 +353,38 @@ class PlotCanvas(FigureCanvas):
         subplot_zlabels = {}
         subplot_handles = {}
 
-        for curve in curves:
+        curve_count = len(curves)
+        for curve_index, curve in enumerate(curves):
             i = self._normalized_subplot_index(curve, max_index)
             ax = self.axes[i]
             x, y, z = curve.xyz()
-            if z is None:
+            if z is None or not _same_length(x, y, z):
                 continue
             style = self._curve_render_style(curve)
             subplot_zlabels.setdefault(i, curve.z_col or "Z")
+            zorder = _curve_zorder(curve_count, curve_index)
 
             if style == "surface":
                 artist, colorbar_label = self._plot_surface_3d(ax, x, y, z, curve)
                 if artist is not None:
+                    artist.set_zorder(zorder)
                     artist.set_label("_nolegend_")
-                    self._add_colorbar(ax, artist, colorbar_label or curve.z_col or curve.label)
+                    setattr(artist, "_plotter_curve", curve)
+                    self._add_colorbar(ax, artist, self._colorbar_label(curve, colorbar_label or curve.z_col or curve.label))
                     curve._mpl_line = artist
-                    subplot_handles.setdefault(i, []).append(
-                        (Patch(facecolor=self._representative_rgba(curve), edgecolor="none"), curve.label)
-                    )
+                    facecolor = self._representative_rgba(curve)
+                    subplot_handles.setdefault(i, []).append((Patch(facecolor=facecolor, edgecolor="none"), curve.label))
                 continue
 
             if style == "volume":
                 mappable, colorbar_label = self._plot_volume_3d(ax, x, y, z, curve)
                 if mappable is not None:
-                    self._add_colorbar(ax, mappable, colorbar_label or "Point density")
+                    if hasattr(mappable, "set_zorder"):
+                        mappable.set_zorder(zorder)
+                    setattr(mappable, "_plotter_curve", curve)
+                    self._add_colorbar(ax, mappable, self._colorbar_label(curve, colorbar_label or "Point density"))
                     subplot_handles.setdefault(i, []).append(
-                        (Patch(facecolor=self._representative_rgba(curve), edgecolor="none", alpha=0.45), curve.label)
+                        (Patch(facecolor=self._representative_rgba(curve), edgecolor="none", alpha=_scaled_alpha(curve, 0.45)), curve.label)
                     )
                 curve._mpl_line = mappable
                 continue
@@ -307,6 +401,8 @@ class PlotCanvas(FigureCanvas):
                 markeredgecolor=curve.marker_edge_color,
                 linestyle=curve.linestyle,
                 linewidth=curve.linewidth,
+                zorder=zorder,
+                alpha=_curve_opacity(curve),
             )
             curve._mpl_line = line
             subplot_handles.setdefault(i, []).append((line, curve.label))
@@ -327,12 +423,9 @@ class PlotCanvas(FigureCanvas):
                 ax.set_xlim(xlim)
             if ylim is not None:
                 ax.set_ylim(ylim)
-            if xticks is not None:
-                ax.xaxis.set_major_locator(MaxNLocator(xticks))
-            if yticks is not None:
-                ax.yaxis.set_major_locator(MaxNLocator(yticks))
-            if zticks is not None:
-                ax.zaxis.set_major_locator(MaxNLocator(zticks))
+            _apply_major_locator(ax.xaxis, xticks)
+            _apply_major_locator(ax.yaxis, yticks)
+            _apply_major_locator(ax.zaxis, zticks)
 
             ax.grid(config.grid)
             if config.legend and subplot_handles.get(i):
@@ -355,33 +448,40 @@ class PlotCanvas(FigureCanvas):
 
     def _plot_surface_3d(self, ax, x, y, z, curve):
         cmap = self._colormap_for_curve(curve)
+        use_colormap = getattr(curve, "uses_colormap", True)
         grid = self._grid_from_xyz(x, y, z)
         try:
             if grid is not None:
                 xg, yg, zg = grid
-                artist = ax.plot_surface(
-                    xg,
-                    yg,
-                    zg,
-                    cmap=cmap,
-                    linewidth=0,
-                    antialiased=True,
-                    shade=True,
-                    alpha=0.95,
-                )
+                kwargs = {
+                    "linewidth": 0,
+                    "antialiased": True,
+                    "shade": True,
+                    "alpha": _scaled_alpha(curve, 0.95),
+                }
+                if use_colormap:
+                    kwargs["cmap"] = cmap
+                else:
+                    kwargs["color"] = curve.color
+                artist = ax.plot_surface(xg, yg, zg, **kwargs)
             else:
-                artist = ax.plot_trisurf(
-                    x,
-                    y,
-                    z,
-                    cmap=cmap,
-                    linewidth=0.2,
-                    antialiased=True,
-                    shade=True,
-                )
+                kwargs = {
+                    "linewidth": 0.2,
+                    "antialiased": True,
+                    "shade": True,
+                    "alpha": _scaled_alpha(curve, 0.95),
+                }
+                if use_colormap:
+                    kwargs["cmap"] = cmap
+                else:
+                    kwargs["color"] = curve.color
+                artist = ax.plot_trisurf(x, y, z, **kwargs)
             return artist, curve.z_col or curve.label
         except Exception:
-            line = ax.scatter(x, y, z, c=z, cmap=cmap, s=15, alpha=0.7)
+            if use_colormap:
+                line = ax.scatter(x, y, z, c=z, cmap=cmap, s=15, alpha=_scaled_alpha(curve, 0.7))
+            else:
+                line = ax.scatter(x, y, z, c=curve.color, s=15, alpha=_scaled_alpha(curve, 0.7))
             return line, curve.z_col or curve.label
 
     def _plot_volume_3d(self, ax, x, y, z, curve):
@@ -403,33 +503,51 @@ class PlotCanvas(FigureCanvas):
         x_edges, y_edges, z_edges = edges
         xg, yg, zg = np.meshgrid(x_edges, y_edges, z_edges, indexing="ij")
         cmap = self._colormap_for_curve(curve)
+        use_colormap = getattr(curve, "uses_colormap", True)
         values = counts[filled]
-        if values.size:
+        if use_colormap and values.size:
             vmin, vmax = float(values.min()), float(values.max())
             if vmin == vmax:
                 vmax = vmin + 1.0
             mapper = Normalize(vmin=vmin, vmax=vmax)
             facecolors = cmap(mapper(counts))
+            facecolors[..., -1] *= _curve_opacity(curve)
             facecolors[~filled, -1] = 0.0
             mappable = ScalarMappable(norm=mapper, cmap=cmap)
             mappable.set_array(counts)
-        else:
+        elif use_colormap:
             facecolors = cmap(np.zeros_like(counts, dtype=float))
+            facecolors[..., -1] *= _curve_opacity(curve)
             mappable = ScalarMappable(cmap=cmap)
             mappable.set_array(counts)
+        else:
+            facecolors = np.zeros(counts.shape + (4,), dtype=float)
+            facecolors[...] = to_rgba(curve.color, alpha=_scaled_alpha(curve, 0.4))
+            facecolors[~filled, -1] = 0.0
+            mappable = None
 
         try:
             ax.voxels(xg, yg, zg, filled, facecolors=facecolors, edgecolors="none", shade=True)
         except Exception:
-            scatter = ax.scatter(
-                points[:, 0],
-                points[:, 1],
-                points[:, 2],
-                c=points[:, 2],
-                cmap=cmap,
-                s=12,
-                alpha=0.2,
-            )
+            if use_colormap:
+                scatter = ax.scatter(
+                    points[:, 0],
+                    points[:, 1],
+                    points[:, 2],
+                    c=points[:, 2],
+                    cmap=cmap,
+                    s=12,
+                    alpha=_scaled_alpha(curve, 0.2),
+                )
+            else:
+                scatter = ax.scatter(
+                    points[:, 0],
+                    points[:, 1],
+                    points[:, 2],
+                    c=curve.color,
+                    s=12,
+                    alpha=_scaled_alpha(curve, 0.2),
+                )
             return scatter, curve.z_col or "Z"
 
         ax.set_xlim(float(x_edges[0]), float(x_edges[-1]))
@@ -470,15 +588,49 @@ class PlotCanvas(FigureCanvas):
         return xg, yg, grid
 
     def _add_colorbar(self, ax, artist, label):
+        if artist is None:
+            return
+        curve = getattr(artist, "_plotter_curve", None)
+        if curve is not None and not getattr(curve, "show_colorbar", True):
+            return
         try:
-            colorbar = self.fig.colorbar(artist, ax=ax)
+            colorbar = self.fig.colorbar(artist, ax=ax, **self._colorbar_kwargs(ax))
             colorbar.set_label(label)
             self._colorbars.append(colorbar)
         except Exception:
             pass
 
+    def _colorbar_kwargs(self, ax):
+        if getattr(ax, "name", "") == "3d":
+            return {
+                "fraction": 0.045,
+                "pad": 0.04,
+                "shrink": 0.78,
+                "aspect": 28,
+            }
+        return {
+            "fraction": 0.05,
+            "pad": 0.035,
+            "shrink": 0.9,
+            "aspect": 26,
+        }
+
     def _representative_rgba(self, curve):
-        return self._colormap_for_curve(curve)(0.65)
+        if getattr(curve, "uses_colormap", False):
+            rgba = self._colormap_for_curve(curve)(0.65)
+            return rgba[:3] + (rgba[3] * _curve_opacity(curve),)
+        return to_rgba(curve.color, alpha=_curve_opacity(curve))
+
+    def _colorbar_label(self, curve, fallback):
+        return getattr(curve, "colorbar_label", None) or fallback
+
+    def _should_show_colorbar(self, curves, subplot_index):
+        for curve in curves:
+            if self._normalized_subplot_index(curve, max(0, len(self.axes) - 1)) != subplot_index:
+                continue
+            if getattr(curve, "uses_colormap", False) and getattr(curve, "show_colorbar", True):
+                return True
+        return False
 
     def _normalized_subplot_index(self, curve, max_index):
         i = max(0, min(int(curve.subplot_index), max_index))

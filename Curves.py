@@ -25,6 +25,10 @@ class Curve:
         z_col=None,
         z_data_file=None,
         subplot_index=0,
+        uses_colormap=False,
+        show_colorbar=True,
+        colorbar_label=None,
+        opacity=1.0,
     ):
         
         self.file_name = file_name 
@@ -48,6 +52,10 @@ class Curve:
         self.marker_size = marker_size
         self.marker_face_color = marker_face_color
         self.marker_edge_color = marker_edge_color
+        self.uses_colormap = uses_colormap
+        self.show_colorbar = show_colorbar
+        self.colorbar_label = colorbar_label
+        self.opacity = opacity
         self._mpl_line = None  # Matplotlib Line2D object after plotting
 
     @property

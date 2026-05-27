@@ -50,6 +50,10 @@ class AppController:
         y_data_file=None,
         z_col=None,
         z_data_file=None,
+        uses_colormap=False,
+        show_colorbar=True,
+        colorbar_label=None,
+        opacity=1.0,
     ):
         name = f"Curve {self.curve_counter}"
         self.curve_counter += 1
@@ -72,6 +76,10 @@ class AppController:
             z_col=z_col,
             z_data_file=z_data_file,
             subplot_index=0,
+            uses_colormap=uses_colormap,
+            show_colorbar=show_colorbar,
+            colorbar_label=colorbar_label,
+            opacity=opacity,
         )
         self.curves.append(curve)
         self.update_plot()
@@ -94,6 +102,10 @@ class AppController:
         subplot_index=0,
         z_col=None,
         render_style="line",
+        uses_colormap=False,
+        show_colorbar=True,
+        colorbar_label=None,
+        opacity=None,
     ):
         c = self.curves[idx]
         c.x_col = x_col
@@ -102,6 +114,11 @@ class AppController:
         c.axis = axis
         c.color = color   
         c.render_style = render_style
+        c.uses_colormap = uses_colormap
+        c.show_colorbar = show_colorbar
+        c.colorbar_label = colorbar_label
+        if opacity is not None:
+            c.opacity = opacity
         # c.marker = Marker
         # c.marker_size = marker_size
         # c.palette_name = palette_name
@@ -168,6 +185,10 @@ class AppController:
                 "linewidth": c.linewidth,
                 "render_style": getattr(c, "render_style", "line"),
                 "subplot_index": c.subplot_index,
+                "uses_colormap": getattr(c, "uses_colormap", False),
+                "show_colorbar": getattr(c, "show_colorbar", True),
+                "colorbar_label": getattr(c, "colorbar_label", None),
+                "opacity": getattr(c, "opacity", 1.0),
 
             })
 
@@ -247,6 +268,8 @@ class AppController:
             z_key = c.get("z_file")
             if requires_z and (not c.get("z_col") or z_key not in self.data_files):
                 continue
+            if not self._curve_columns_exist(c, requires_z):
+                continue
 
             curve = self._make_curve_from_dict(c)
             self.curves.append(curve)
@@ -266,6 +289,25 @@ class AppController:
             if df is data_file:
                 return k
         return None
+
+    def _curve_columns_exist(self, curve_state: dict, requires_z: bool):
+        x_key = curve_state.get("x_file")
+        y_key = curve_state.get("y_file")
+        if x_key not in self.data_files or y_key not in self.data_files:
+            return False
+
+        if curve_state.get("x_col") not in self.data_files[x_key].headers:
+            return False
+        if curve_state.get("y_col") not in self.data_files[y_key].headers:
+            return False
+
+        z_key = curve_state.get("z_file")
+        z_col = curve_state.get("z_col")
+        if requires_z:
+            return z_key in self.data_files and z_col in self.data_files[z_key].headers
+        if z_key and z_col:
+            return z_key in self.data_files and z_col in self.data_files[z_key].headers
+        return True
 
     def _make_curve_from_dict(self, d: dict):
         from Curves import Curve  # adjust to your actual import
@@ -295,6 +337,10 @@ class AppController:
             z_data_file=z_df,
             name=d.get("name", "Curve"),
             subplot_index=d.get("subplot_index", 0),
+            uses_colormap=d.get("uses_colormap", False),
+            show_colorbar=d.get("show_colorbar", True),
+            colorbar_label=d.get("colorbar_label"),
+            opacity=d.get("opacity", 1.0),
         )
         return curve
 

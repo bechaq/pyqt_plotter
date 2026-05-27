@@ -22,7 +22,7 @@ from functools import partial
 from pathlib import Path
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QListWidget, QListWidgetItem, QLineEdit, QComboBox,
-    QFileDialog, QMessageBox, QHBoxLayout, QVBoxLayout, QGridLayout, QSlider, QCheckBox, QScrollArea, QApplication, QDialog, QAbstractButton, QShortcut, QStackedWidget,
+    QFileDialog, QMessageBox, QHBoxLayout, QVBoxLayout, QGridLayout, QSlider, QCheckBox, QScrollArea, QApplication, QDialog, QAbstractButton, QShortcut, QStackedWidget, QSplitter,
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QKeySequence
@@ -151,14 +151,19 @@ class MainWindow(QMainWindow):
 
     def _build_workspace_page(self):
         workspace = QWidget()
-        self.main_layout = QHBoxLayout(workspace)
+        self.main_layout = QVBoxLayout(workspace)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.workspace_splitter = QSplitter(Qt.Horizontal)
+        self.main_layout.addWidget(self.workspace_splitter)
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setMinimumWidth(280)
         self.controls = PlotterControlPanel(self.controller)
         scroll_area.setWidget(self.controls)
-        self.main_layout.addWidget(scroll_area, 1)
+        self.workspace_splitter.addWidget(scroll_area)
 
         # Right: toolbar + canvas stacked vertically
         right_panel = QWidget()
@@ -166,7 +171,11 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        self.main_layout.addWidget(right_panel, 3)
+        self.workspace_splitter.addWidget(right_panel)
+        self.workspace_splitter.setChildrenCollapsible(False)
+        self.workspace_splitter.setStretchFactor(0, 0)
+        self.workspace_splitter.setStretchFactor(1, 1)
+        self.workspace_splitter.setSizes([380, 1060])
 
         # Store for later use
         self._right_layout = right_layout
@@ -261,6 +270,12 @@ class MainWindow(QMainWindow):
             "palette_label",
             "color_combo",
             "color_label",
+            "color_mode_combo",
+            "color_mode_label",
+            "show_colorbar_checkbox",
+            "colorbar_label",
+            "colorbar_label_edit",
+            "opacity_slider",
             "undo_btn",
             "redo_btn",
             "export_png_btn",
@@ -576,6 +591,7 @@ class MainWindow(QMainWindow):
         self.add_curve_btn.clicked.connect(self.add_curve)
         self.remove_curve_btn.clicked.connect(self.remove_selected_curve)
         self.curve_list.currentRowChanged.connect(self.on_curve_selected)
+        self.curve_list.model().rowsMoved.connect(self.on_curve_rows_reordered_from_list)
         self.subplot_index_combo.currentTextChanged.connect(self.on_curve_settings_changed)
         self.palette_combo.currentTextChanged.connect(self.on_palette_changed)
         self.x_combo.currentTextChanged.connect(self.on_curve_settings_changed)
@@ -586,6 +602,11 @@ class MainWindow(QMainWindow):
         self.axis_combo.currentTextChanged.connect(self.on_curve_settings_changed)
         self.curve_name_edit.editingFinished.connect(self.on_curve_settings_changed)
         self.color_combo.currentTextChanged.connect(self.on_curve_settings_changed)
+        self.color_mode_combo.currentTextChanged.connect(self.on_curve_settings_changed)
+        self.color_mode_combo.currentTextChanged.connect(lambda *_: self._apply_plot_mode_ui())
+        self.show_colorbar_checkbox.clicked.connect(self.on_curve_settings_changed)
+        self.colorbar_label_edit.editingFinished.connect(self.on_curve_settings_changed)
+        self.opacity_slider.valueChanged.connect(self.on_curve_settings_changed)
         self.dimension_combo.currentTextChanged.connect(self.on_canvas_settings_changed)
         self.x_ticks_edit.valueChanged.connect(self.on_canvas_settings_changed)
         self.y_ticks_edit.valueChanged.connect(self.on_canvas_settings_changed)
@@ -705,6 +726,7 @@ class MainWindow(QMainWindow):
 
     def _activate_plot_mode(self, mode):
         self.controller.config.plot_mode = mode
+        self._set_default_color_mode_for_context(mode)
         self._apply_plot_mode_ui()
         self.controller.update_plot()
         self._show_workspace()
@@ -714,10 +736,12 @@ class MainWindow(QMainWindow):
         needs_z = plot_mode_requires_z(plot_mode)
         supports_secondary_axis = plot_mode_supports_secondary_axis(plot_mode)
         current_3d_style = self._current_3d_style()
-        uses_colormap = render_style_uses_colormap(plot_mode, current_3d_style)
-        supports_direct_color = plot_mode_supports_direct_color(plot_mode) and not uses_colormap
+        supports_color_mode = plot_mode == "heatmap2d" or (plot_mode == "plot3d" and current_3d_style in {"surface", "volume"})
+        uses_colormap = self._current_uses_colormap() if supports_color_mode else render_style_uses_colormap(plot_mode, current_3d_style)
+        supports_direct_color = (plot_mode_supports_direct_color(plot_mode) or supports_color_mode) and not uses_colormap
         supports_render_style = plot_mode_supports_render_style(plot_mode)
         supports_z_ticks = plot_mode_supports_z_ticks(plot_mode)
+        show_palette = plot_mode == "line2d" or uses_colormap
 
         self.plot_mode_value.setText(friendly_plot_mode(plot_mode))
         self.z_column_label.setText("Z column" if plot_mode == "plot3d" else "Z / value column")
@@ -729,10 +753,17 @@ class MainWindow(QMainWindow):
         self.axis_combo.setVisible(supports_secondary_axis)
         self.render_style_label.setVisible(supports_render_style)
         self.render_style_combo.setVisible(supports_render_style)
+        self.color_mode_label.setVisible(supports_color_mode)
+        self.color_mode_combo.setVisible(supports_color_mode)
         self.palette_label.setText("Colormap" if uses_colormap else "Palette")
-        self.color_label.setText("Line color" if plot_mode == "plot3d" else "Curve color")
+        self.palette_label.setVisible(show_palette)
+        self.palette_combo.setVisible(show_palette)
+        self.color_label.setText("Solid color" if supports_color_mode else "Curve color")
         self.color_label.setVisible(supports_direct_color)
         self.color_combo.setVisible(supports_direct_color)
+        self.show_colorbar_checkbox.setVisible(uses_colormap and supports_color_mode)
+        self.colorbar_label.setVisible(uses_colormap and supports_color_mode)
+        self.colorbar_label_edit.setVisible(uses_colormap and supports_color_mode)
         self.add_curve_btn.setText(
             "Add heatmap" if plot_mode == "heatmap2d"
             else f"Add {friendly_3d_style(current_3d_style).lower()}" if plot_mode == "plot3d"
@@ -744,6 +775,16 @@ class MainWindow(QMainWindow):
         if idx >= 0 and idx < len(self.controller.curves):
             return getattr(self.controller.curves[idx], "render_style", "line")
         return self.render_style_combo.currentData() or "line"
+
+    def _current_uses_colormap(self):
+        idx = self.curve_list.currentRow()
+        if idx >= 0 and idx < len(self.controller.curves):
+            return getattr(self.controller.curves[idx], "uses_colormap", True)
+        return (self.color_mode_combo.currentData() or "colormap") == "colormap"
+
+    def _has_selected_curve(self):
+        idx = self.curve_list.currentRow()
+        return 0 <= idx < len(self.controller.curves)
 
     def _curve_display_name(self, curve):
         return curve.display_name(getattr(self.controller.config, "plot_mode", "line2d"))
@@ -931,6 +972,7 @@ class MainWindow(QMainWindow):
             self.controller.data_files[file_key] = data_file
             self.refresh_files_list()
             self.populate_all_columns()
+            self._select_default_columns_for_file(file_key)
             for i in range(self.files_list.count()):
                 item = self.files_list.item(i)
                 if item.data(Qt.UserRole) == file_key:
@@ -1015,8 +1057,27 @@ class MainWindow(QMainWindow):
         self.curve_list.blockSignals(True)
         self.curve_list.clear()
         for c in self.controller.curves:
-            self.curve_list.addItem(self._curve_display_name(c))
+            item = QListWidgetItem(self._curve_display_name(c))
+            item.setData(Qt.UserRole, c)
+            self.curve_list.addItem(item)
         self.curve_list.blockSignals(False)
+
+    def on_curve_rows_reordered_from_list(self, *args):
+        ordered_curves = []
+        for row in range(self.curve_list.count()):
+            item = self.curve_list.item(row)
+            curve = item.data(Qt.UserRole) if item is not None else None
+            if curve in self.controller.curves and curve not in ordered_curves:
+                ordered_curves.append(curve)
+
+        if len(ordered_curves) != len(self.controller.curves):
+            self.refresh_curve_list()
+            return
+
+        before_state = self._snapshot_state()
+        self.controller.curves = ordered_curves
+        self.controller.update_plot()
+        self._finalize_state_change(before_state)
 
     def add_curve(self):
         if not self.controller.data_files:
@@ -1032,6 +1093,14 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", message)
             return
 
+        selected_columns = [x_data, y_data]
+        if plot_mode_requires_z(plot_mode):
+            selected_columns.append(z_data)
+        if not self._selected_columns_have_matching_lengths(selected_columns):
+            self._show_column_length_mismatch_warning()
+            self._fallback_column_selection(selected_columns)
+            return
+
         x_file_name, x_col = x_data
         y_file_name, y_col = y_data
         z_file_name = z_col = None
@@ -1044,6 +1113,7 @@ class MainWindow(QMainWindow):
         file_name = x_file_name
         data_file = x_data_file
         render_style = self.render_style_combo.currentData() or "line"
+        uses_colormap = self._new_curve_uses_colormap(plot_mode, render_style)
         before_state = self._snapshot_state()
         self.controller.add_curve(
             file_name,
@@ -1058,6 +1128,10 @@ class MainWindow(QMainWindow):
             y_data_file=y_data_file,
             z_col=z_col if plot_mode_requires_z(plot_mode) else None,
             z_data_file=z_data_file if plot_mode_requires_z(plot_mode) else None,
+            uses_colormap=uses_colormap,
+            show_colorbar=self.show_colorbar_checkbox.isChecked() if uses_colormap else False,
+            colorbar_label=self.colorbar_label_edit.text().strip() or None,
+            opacity=self.opacity_slider.value() / 100.0,
         )
         self.refresh_curve_list()
         new_idx = len(self.controller.curves) - 1
@@ -1093,7 +1167,9 @@ class MainWindow(QMainWindow):
         widgets_to_block = [
             self.x_combo, self.y_combo, self.z_combo, self.axis_combo, self.curve_name_edit,
             self.render_style_combo,
-            self.palette_combo, self.color_combo, self.subplot_index_combo
+            self.palette_combo, self.color_combo, self.subplot_index_combo,
+            self.color_mode_combo, self.show_colorbar_checkbox, self.colorbar_label_edit,
+            self.opacity_slider,
         ]
         for w in widgets_to_block:
             w.blockSignals(True)
@@ -1123,6 +1199,13 @@ class MainWindow(QMainWindow):
         self.palette_combo.setCurrentText(c.palette_name)
         populate_color_combo(self.color_combo, PLOTLY_PALETTES[c.palette_name])
         ensure_color_in_combo(self.color_combo, c.color)
+        mode = "colormap" if getattr(c, "uses_colormap", False) else "solid"
+        mode_idx = self.color_mode_combo.findData(mode)
+        if mode_idx >= 0:
+            self.color_mode_combo.setCurrentIndex(mode_idx)
+        self.show_colorbar_checkbox.setChecked(getattr(c, "show_colorbar", True))
+        self.colorbar_label_edit.setText(getattr(c, "colorbar_label", "") or "")
+        self.opacity_slider.setValue(int(round(getattr(c, "opacity", 1.0) * 100)))
         for w in widgets_to_block:
             w.blockSignals(False)
         self._apply_plot_mode_ui()
@@ -1145,6 +1228,28 @@ class MainWindow(QMainWindow):
         y_data = self.y_combo.currentData(Qt.UserRole)
         z_data = self.z_combo.currentData(Qt.UserRole)
 
+        selected_columns = []
+        if x_data:
+            selected_columns.append(x_data)
+        elif self._find_key_for_data_file(c.x_data_file):
+            selected_columns.append((self._find_key_for_data_file(c.x_data_file), c.x_col))
+
+        if y_data:
+            selected_columns.append(y_data)
+        elif self._find_key_for_data_file(c.y_data_file):
+            selected_columns.append((self._find_key_for_data_file(c.y_data_file), c.y_col))
+
+        if plot_mode_requires_z(plot_mode):
+            if z_data:
+                selected_columns.append(z_data)
+            elif c.z_data_file is not None and self._find_key_for_data_file(c.z_data_file):
+                selected_columns.append((self._find_key_for_data_file(c.z_data_file), c.z_col))
+
+        if not self._selected_columns_have_matching_lengths(selected_columns):
+            self._show_column_length_mismatch_warning()
+            self._fallback_column_selection(selected_columns, curve_index=idx)
+            return
+
         if x_data:
             x_file_name, x_col = x_data
             c.x_data_file = self.controller.data_files[x_file_name]
@@ -1165,6 +1270,7 @@ class MainWindow(QMainWindow):
             z_col = c.z_col
 
         render_style = self.render_style_combo.currentData() or getattr(c, "render_style", "line")
+        uses_colormap = self._new_curve_uses_colormap(plot_mode, render_style)
         self.controller.update_curve(
             idx,
             x_col,
@@ -1175,6 +1281,10 @@ class MainWindow(QMainWindow):
             subplot_index=int(self.subplot_index_combo.currentText() or "0"),
             z_col=z_col if plot_mode_requires_z(plot_mode) else c.z_col,
             render_style=render_style if plot_mode == "plot3d" else "line",
+            uses_colormap=uses_colormap,
+            show_colorbar=self.show_colorbar_checkbox.isChecked() if uses_colormap else False,
+            colorbar_label=self.colorbar_label_edit.text().strip() or None,
+            opacity=self.opacity_slider.value() / 100.0,
         )
 
         item = self.curve_list.item(idx)
@@ -1190,6 +1300,24 @@ class MainWindow(QMainWindow):
 
         self.controller.update_plot()
         self._finalize_state_change(before_state)
+
+    def _new_curve_uses_colormap(self, plot_mode, render_style):
+        if plot_mode == "heatmap2d":
+            return (self.color_mode_combo.currentData() or "colormap") == "colormap"
+        if plot_mode == "plot3d" and render_style in {"surface", "volume"}:
+            return (self.color_mode_combo.currentData() or "colormap") == "colormap"
+        return False
+
+    def _set_default_color_mode_for_context(self, plot_mode):
+        default_mode = "colormap" if plot_mode == "heatmap2d" else "solid"
+        index = self.color_mode_combo.findData(default_mode)
+        if index >= 0:
+            self.color_mode_combo.blockSignals(True)
+            self.color_mode_combo.setCurrentIndex(index)
+            self.color_mode_combo.blockSignals(False)
+        self.show_colorbar_checkbox.blockSignals(True)
+        self.show_colorbar_checkbox.setChecked(default_mode == "colormap")
+        self.show_colorbar_checkbox.blockSignals(False)
 
     # ------------------------------------------------------------------
     # Canvas settings -> config update
@@ -1679,3 +1807,51 @@ class MainWindow(QMainWindow):
             if combo.itemData(i, Qt.UserRole) == wanted:
                 combo.setCurrentIndex(i)
                 return
+
+    def _selected_columns_have_matching_lengths(self, selected_columns):
+        lengths = []
+        for selection in selected_columns:
+            if not selection:
+                continue
+            file_key, column_name = selection
+            data_file = self.controller.data_files.get(file_key)
+            if data_file is None:
+                return False
+            lengths.append(len(data_file.get_column(column_name)))
+        return len(set(lengths)) <= 1
+
+    def _show_column_length_mismatch_warning(self):
+        QMessageBox.warning(
+            self,
+            "Column length mismatch",
+            "Selected X, Y, and Z columns must have the same number of rows.",
+        )
+
+    def _fallback_column_selection(self, selected_columns, curve_index=None):
+        if curve_index is not None and 0 <= curve_index < len(self.controller.curves):
+            self.on_curve_selected(curve_index)
+            return
+
+        for selection in selected_columns:
+            if not selection:
+                continue
+            file_key, _ = selection
+            if file_key in self.controller.data_files:
+                self._select_default_columns_for_file(file_key)
+                return
+
+    def _select_default_columns_for_file(self, file_key):
+        data_file = self.controller.data_files.get(file_key)
+        if data_file is None or not data_file.headers:
+            return
+
+        defaults = [
+            (self.x_combo, data_file.headers[0]),
+            (self.y_combo, data_file.headers[1] if len(data_file.headers) > 1 else data_file.headers[0]),
+            (self.z_combo, data_file.headers[2] if len(data_file.headers) > 2 else data_file.headers[-1]),
+        ]
+
+        for combo, column_name in defaults:
+            combo.blockSignals(True)
+            self._set_combo_to_column(combo, file_key, column_name)
+            combo.blockSignals(False)

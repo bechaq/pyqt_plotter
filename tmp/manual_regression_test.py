@@ -275,6 +275,10 @@ def main():
         window.controller.data_files[xyz_key] = xyz_df
         window.controller.config.plot_mode = "heatmap2d"
         window._apply_plot_mode_ui()
+        heatmap_color_mode = window.color_mode_combo.findData("colormap")
+        if heatmap_color_mode >= 0:
+            window.color_mode_combo.setCurrentIndex(heatmap_color_mode)
+        window.show_colorbar_checkbox.setChecked(True)
         assert_true(window.z_ticks_edit.isHidden(), "Heatmap mode should keep the Z tick control hidden")
         window.refresh_files_list()
         window.populate_all_columns()
@@ -308,9 +312,10 @@ def main():
         window.on_canvas_settings_changed()
         assert_true(window.controller.config.zticksN == 9, "Z tick control should update the 3D config")
         assert_true(
-            window.canvas.axes[0].zaxis.get_major_locator().__class__.__name__ == "MaxNLocator",
-            "3D Z axis should use a MaxNLocator",
+            window.canvas.axes[0].zaxis.get_major_locator().__class__.__name__ == "LinearLocator",
+            "3D Z axis should use an exact-count LinearLocator",
         )
+        assert_true(len(window.canvas.axes[0].get_zticks()) == 9, "Z tick control should apply exactly 9 visible ticks")
         plot3d_clone = project_roundtrip(window, root / "plot3d_roundtrip.pproj")
         plot3d_clone.close()
 
@@ -318,9 +323,15 @@ def main():
         surface_idx = window.render_style_combo.findData("surface")
         assert_true(surface_idx >= 0, "3D style combo should include surface")
         window.render_style_combo.setCurrentIndex(surface_idx)
+        solid_mode_idx = window.color_mode_combo.findData("solid")
+        assert_true(solid_mode_idx >= 0, "Color mode combo should include solid color")
+        window.color_mode_combo.setCurrentIndex(solid_mode_idx)
         window.add_curve()
         window.controller.update_plot()
         assert_true(window.controller.curves[0].render_style == "surface", "Surface mode should persist the chosen render style")
+        assert_true(window.controller.curves[0].uses_colormap is False, "Surface mode should support a solid-color render mode")
+        assert_true(window.controller.curves[0].show_colorbar is False, "Solid-color surfaces should not force a colorbar")
+        assert_true(len(window.canvas._colorbars) == 0, "Solid-color surfaces should not create a colorbar")
         assert_true(len(window.canvas.axes[0].collections) > 0, "Surface mode should draw a 3D collection")
         surface_clone = project_roundtrip(window, root / "surface_roundtrip.pproj")
         surface_clone.close()
@@ -329,12 +340,38 @@ def main():
         volume_idx = window.render_style_combo.findData("volume")
         assert_true(volume_idx >= 0, "3D style combo should include volume")
         window.render_style_combo.setCurrentIndex(volume_idx)
+        colormap_mode_idx = window.color_mode_combo.findData("colormap")
+        window.color_mode_combo.setCurrentIndex(colormap_mode_idx)
+        window.show_colorbar_checkbox.setChecked(True)
         window.add_curve()
         window.controller.update_plot()
         assert_true(window.controller.curves[0].render_style == "volume", "Volume mode should persist the chosen render style")
         assert_true(len(window.canvas._colorbars) >= 1, "Volume mode should add a colorbar")
         volume_clone = project_roundtrip(window, root / "volume_roundtrip.pproj")
         volume_clone.close()
+
+        assert_true(hasattr(window, "workspace_splitter"), "Workspace should expose a draggable splitter")
+        assert_true(window.workspace_splitter.count() == 2, "Workspace splitter should contain left controls and right plot area")
+
+        window.controller.curves.clear()
+        window.render_style_combo.setCurrentIndex(surface_idx)
+        window.color_mode_combo.setCurrentIndex(colormap_mode_idx)
+        window.show_colorbar_checkbox.setChecked(True)
+        window.add_curve()
+        boxes = []
+        colorbar_boxes = []
+        for _ in range(4):
+            window.controller.update_plot()
+            plot_box = window.canvas.axes[0].get_position()
+            boxes.append(tuple(round(v, 4) for v in (plot_box.x0, plot_box.y0, plot_box.x1, plot_box.y1)))
+            assert_true(len(window.canvas._colorbars) == 1, "Repeated 3D redraws should preserve exactly one colorbar")
+            cb_ax = window.canvas._colorbars[0].ax
+            cb_box = cb_ax.get_position()
+            colorbar_boxes.append(tuple(round(v, 4) for v in (cb_box.x0, cb_box.y0, cb_box.x1, cb_box.y1)))
+        assert_true(len(set(boxes)) == 1, "Repeated redraws should not keep shrinking the main plot axes")
+        plot_box = window.canvas.axes[0].get_position()
+        cb_box = window.canvas._colorbars[0].ax.get_position()
+        assert_true((cb_box.x1 - cb_box.x0) < (plot_box.x1 - plot_box.x0) * 0.2, "Colorbar should stay visually narrower than the main plot")
 
         exercise_undo_redo_if_available(window)
 

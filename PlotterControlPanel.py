@@ -1,5 +1,6 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QGridLayout,
@@ -8,6 +9,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QAbstractItemView,
     QPlainTextEdit,
     QPushButton,
     QSlider,
@@ -109,6 +111,10 @@ class PlotterControlPanel(QWidget):
         layout.addWidget(self.add_curve_btn)
 
         self.curve_list = QListWidget()
+        self.curve_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.curve_list.setDefaultDropAction(Qt.MoveAction)
+        self.curve_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.curve_list.setDropIndicatorShown(True)
         layout.addWidget(self.curve_list)
         layout.addWidget(self.remove_curve_btn)
 
@@ -159,13 +165,38 @@ class PlotterControlPanel(QWidget):
         self.color_combo = QComboBox()
         populate_color_combo(self.color_combo, PLOTLY_PALETTES[self.controller.config.palette_name])
         self.color_combo.setFixedWidth(110)
+        self.color_mode_combo = QComboBox()
+        self.color_mode_combo.addItem("Colormap", "colormap")
+        self.color_mode_combo.addItem("Solid color", "solid")
+        self.show_colorbar_checkbox = QCheckBox("Show color bar")
+        self.show_colorbar_checkbox.setChecked(True)
+        self.colorbar_label_edit = QLineEdit()
+        self.colorbar_label_edit.setPlaceholderText("Color bar label")
         self.palette_label = QLabel("Palette")
         self.color_label = QLabel("Curve color")
+        self.color_mode_label = QLabel("Color mode")
+        self.colorbar_label = QLabel("Color bar label")
         color_row.addWidget(self.palette_label, 0, 0)
         color_row.addWidget(self.color_label, 0, 1)
+        color_row.addWidget(self.color_mode_label, 0, 2)
         color_row.addWidget(self.palette_combo, 1, 0)
         color_row.addWidget(self.color_combo, 1, 1)
+        color_row.addWidget(self.color_mode_combo, 1, 2)
         form.addRow(color_row)
+
+        colorbar_row = QGridLayout()
+        colorbar_row.addWidget(self.show_colorbar_checkbox, 0, 0)
+        colorbar_row.addWidget(self.colorbar_label, 0, 1)
+        colorbar_row.addWidget(self.colorbar_label_edit, 1, 1)
+        form.addRow(colorbar_row)
+
+        opacity_row = QGridLayout()
+        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setRange(0, 100)
+        self.opacity_slider.setValue(100)
+        opacity_row.addWidget(QLabel("Opacity"), 0, 0)
+        opacity_row.addWidget(self.opacity_slider, 0, 1)
+        form.addRow(opacity_row)
 
         layout.addLayout(form)
         self.control_layout.addWidget(group)
